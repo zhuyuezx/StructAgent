@@ -1,0 +1,32 @@
+{
+  "paths": {
+    "screenshots_dir": "screenshots",
+    "test_output_dir": "test_output"
+  },
+
+  "calibration": {
+    "ui_elements": {
+      "Rectangle_Tool": {"x": 20, "y": 290, "w": 30, "h": 30},
+      "Ellipse_Tool":   {"x": 165, "y": 290, "w": 30, "h": 30},
+      "Text_Tool":      {"x": 90, "y": 290, "w": 30, "h": 30},
+      "Arrow_Tool":     {"x": 160, "y": 510, "w": 30, "h": 30}
+    },
+    "canvas_nodes": [],
+    "canvas_edges": [],
+    "empty_canvas_point": [600, 400]
+  },
+
+  "llm": {
+    "model": "qwen3.5:35b",
+    "max_steps": 10
+  },
+
+  "executor": {
+    "failsafe": true,
+    "pause": 0.15,
+    "drag_duration": 0.5,
+    "type_interval": 0.03,
+    "step_cooldown": 0.5,
+    "countdown_seconds": 5
+  }
+}
