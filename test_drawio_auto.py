@@ -120,7 +120,12 @@ def llm_step(
         print(f"  ▶ Executing: {info['tool']}({info['params']})")
         result = dispatch(info["tool"], info["params"], ui_graph=ui_graph)
         info["result"] = result
-        info["executed"] = True
+        if result.get("status") == "error":
+            print(f"  ❌ Dispatch error: {result['error']}")
+            info["executed"] = False
+            info["error"] = result["error"]
+        else:
+            info["executed"] = True
         time.sleep(0.8)  # let draw.io catch up
 
     return info

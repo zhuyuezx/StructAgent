@@ -268,6 +268,9 @@ TOOL_CATALOG = {
 def dispatch(tool_name: str, params: dict, ui_graph: Optional[Dict[str, Any]] = None) -> dict:
     """
     Execute a tool by name.  Injects ``ui_graph`` for tools that need it.
+
+    Validates required params before calling, so LLM omissions produce
+    clear error messages instead of cryptic TypeErrors.
     """
     entry = TOOL_CATALOG.get(tool_name)
     if entry is None:
@@ -279,4 +282,17 @@ def dispatch(tool_name: str, params: dict, ui_graph: Optional[Dict[str, Any]] = 
             ui_graph = config.ui_graph()
         kw["ui_graph"] = ui_graph
 
-    return entry["fn"](**kw)
+    # Validate required params
+    required = entry["params"]
+    missing = [p for p in required if p not in kw]
+    if missing:
+        return {
+            "status": "error",
+            "tool": tool_name,
+            "error": f"Missing required params: {missing}. Expected: {required}",
+        }
+
+    try:
+        return entry["fn"](**kw)
+    except Exception as e:
+        return {"status": "error", "tool": tool_name, "error": str(e)}
