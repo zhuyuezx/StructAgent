@@ -1,0 +1,5 @@
+screenshots/
+test_output/
+__pycache__/
+.env
+*.pyc
