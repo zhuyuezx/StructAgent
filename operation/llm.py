@@ -28,10 +28,10 @@ from .tools import TOOL_CATALOG
 def _tool_table() -> str:
     """Render the tool catalog as a markdown table for the prompt."""
     lines = []
-    for name, meta in TOOL_CATALOG.items():
-        params = ", ".join(meta["params"]) if meta["params"] else "(none)"
-        lines.append(f"| {name} | {params} | {meta['description']} |")
-    header = "| tool | params | description |\n|------|--------|-------------|"
+    for name, node in TOOL_CATALOG.items():
+        params = ", ".join(node.params) if node.params else "(none)"
+        lines.append(f"| {name} | L{node.level} | {params} | {node.description} |")
+    header = "| tool | level | params | description |\n|------|-------|--------|-------------|"
     return header + "\n" + "\n".join(lines)
 
 

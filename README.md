@@ -1,114 +1,6 @@
 # drawioDemo
 
-Agentic AI for Draw.io Automation
-
-## Project Structure
-
-```
-config.json                  ← Architectural config (paths, models, executor, explorer)
-main.py                      ← CLI entry point for the operation pipeline
-
-shared/                      ← Shared utilities (used by both pipelines)
-  config.py                  ← Config loader (reads config.json + icons.json)
-  capture.py                 ← Screenshot capture
-
-exploration/                 ← Pipeline 2: UI exploration & auto-calibration
-  explorer.py                ← OpenCV icon detection + VLM labeling
-  test_collect_icons.py      ← Test script for exploration pipeline
-  icons.json                 ← OUTPUT: auto-detected icon coordinates
-
-operation/                   ← Pipeline 1: LLM-driven draw.io operations
-  tools.py                   ← Operational tools (place, move, type, etc.)
-  llm.py                     ← LLM inference (tool selection via Ollama)
-  pipeline.py                ← Agentic control loop
-  test_manual.py             ← Manual test (no LLM)
-  test_auto.py               ← LLM integration test (escalating difficulty)
-```
-
-## Two Pipelines
-
-| Pipeline | Folder | Purpose |
-|----------|--------|---------|
-| **Exploration** | `exploration/` | Auto-detects UI elements → labels with VLM → writes `icons.json` |
-| **Operation** | `operation/` | Uses configured tools to operate draw.io via LLM |
-
-Exploration feeds Operation: it discovers what's clickable and writes coordinates to `icons.json`, which Operation reads at runtime.
-
-## Data Files
-
-| File | Owner | Content |
-|------|-------|---------|
-| `config.json` | Manual | Architectural settings (paths, models, executor tuning, explorer params) |
-| `exploration/icons.json` | Exploration pipeline | Auto-detected icon positions (`{ui_elements: {...}}`) |
-
-## Quick Start
-
-```bash
-pip install -r requirements.txt
-```
-
-### Step 1: Auto-detect sidebar icons (Exploration)
-
-```bash
-# Detect icons from a live screenshot
-python exploration/test_collect_icons.py --detect
-
-# Use an existing screenshot
-python exploration/test_collect_icons.py --detect --image screenshots/explore.png
-
-# Detect + label with VLM
-python exploration/test_collect_icons.py --detect --label
-
-# Detect + label + write to icons.json
-python exploration/test_collect_icons.py --detect --label --write
-```
-
-### Step 2: Manual test (Operation, no LLM)
-
-```bash
-python operation/test_manual.py --run single --label "Cache"
-python operation/test_manual.py --run double
-```
-
-### Step 3: LLM integration test (Operation)
-
-```bash
-python operation/test_auto.py --level 1      # single-step
-python operation/test_auto.py --level 2      # two-step
-python operation/test_auto.py --level 3      # multi-step
-python operation/test_auto.py --prompt-only  # inspect prompt
-```
-
-### Step 4: Full pipeline
-
-```bash
-python main.py --task "Draw a rectangle labelled Cache"
-```
-
-## Configuration
-
-### config.json (architectural)
-
-| Section | Purpose |
-|---------|---------|
-| `paths` | Screenshot and test output directories |
-| `calibration` | Canvas nodes/edges, empty canvas click point |
-| `llm` | Ollama model name and step limit for the planner |
-| `executor` | pyautogui tuning (pause, drag speed, etc.) |
-| `explorer` | Detection params, VLM model for icon labeling |
-
-### exploration/icons.json (auto-generated)
-
-Written by the exploration pipeline. Contains `ui_elements` — a map of tool names to `{x, y, w, h}` in logical pixels:
-
-```json
-{
-  "ui_elements": {
-    "Rectangle_Tool": {"x": 20, "y": 290, "w": 30, "h": 30},
-    "Ellipse_Tool": {"x": 165, "y": 290, "w": 30, "h": 30}
-  }
-}
-```
+Agentic AI for Draw.io — Hierarchical Tool Composition
 
 ## Architecture
 
@@ -117,9 +9,139 @@ Exploration Pipeline:
   Screenshot → OpenCV detect → VLM label → icons.json
 
 Operation Pipeline:
-  User Task → LLM (picks tool) → dispatch() → pyautogui
-                                      ↑
-                                  icons.json
+  User Task → LLM (picks tool from tree) → dispatch() → pyautogui
+                                                ↑
+                                          icons.json (coordinates)
 ```
 
-The LLM **never sees pixel coordinates** — it only picks named tools.
+The LLM **never sees pixel coordinates** — it picks named tools. The tool tree handles coordinate resolution.
+
+## Hierarchical Tool Tree
+
+Each tool is a **ToolNode** with its own execution logic and children.
+Level is auto-computed: leaf = L0, compound = max(child.level) + 1.
+
+```
+L1 place_and_label(tool_name, label)
+  L0 place_shape(tool_name)
+  L0 type_label(text)
+  L0 press_escape()
+  L0 click_empty_canvas()
+
+L1 edit_label(node_ref, new_label)
+  L0 double_click_node(node_ref)
+  L0 select_all()
+  L0 type_label(text)
+  L0 press_escape()
+  L0 click_empty_canvas()
+
+L1 delete_node(node_ref)
+  L0 click_node(node_ref, clicks)
+  L0 press_delete()
+  L0 click_empty_canvas()
+
+L1 move_and_deselect(node_ref, target_x, target_y)
+  L0 drag_node(node_ref, target_x, target_y)
+  L0 click_empty_canvas()
+```
+
+To visualize the full tree: `python operation/demo_integration.py --tree`
+
+## Project Structure
+
+```
+config.json                  ← Architectural config (paths, models, executor)
+main.py                      ← CLI entry point
+
+shared/                      ← Shared utilities
+  config.py                  ← Reads config.json + icons.json
+  capture.py                 ← Screenshot capture
+
+exploration/                 ← Pipeline 2: UI exploration
+  explorer.py                ← OpenCV detection + VLM labeling
+  test_collect_icons.py      ← Test script
+  icons.json                 ← OUTPUT: detected icon coordinates
+
+operation/                   ← Pipeline 1: LLM-driven operations
+  tools.py                   ← ToolNode tree (L0 leaves + compounds)
+  llm.py                     ← LLM inference (tool selection)
+  pipeline.py                ← Agentic control loop
+  demo_integration.py        ← Integration demo (exploration → operation)
+  test_manual.py             ← Manual test (no LLM)
+  test_auto.py               ← LLM integration test
+```
+
+## Quick Start
+
+```bash
+pip install -r requirements.txt
+```
+
+### 1. Explore: auto-detect sidebar icons
+
+```bash
+# Detect + label + write to icons.json
+python exploration/test_collect_icons.py --detect --label --write
+
+# Use existing screenshot
+python exploration/test_collect_icons.py --detect --image screenshots/explore.png
+```
+
+### 2. Demo: prove exploration → operation integration
+
+```bash
+# Show the tool tree
+python operation/demo_integration.py --tree
+
+# Dry run (no mouse movement)
+python operation/demo_integration.py --mode both --dry-run
+
+# Live demo (place shapes using exploration-detected coordinates)
+python operation/demo_integration.py --mode both
+```
+
+### 3. LLM integration test
+
+```bash
+python operation/test_auto.py --level 1      # single-step
+python operation/test_auto.py --level 2      # two-step
+python operation/test_auto.py --level 3      # multi-step
+```
+
+### 4. Full pipeline
+
+```bash
+python main.py --task "Draw a rectangle labelled Cache"
+```
+
+## Data Files
+
+| File | Owner | Content |
+|------|-------|---------|
+| `config.json` | Manual | Architectural settings (paths, models, executor, explorer params) |
+| `exploration/icons.json` | Exploration | Auto-detected icon positions and labels |
+
+## Adding New Tools
+
+Compound tools are just ToolNodes with children:
+
+```python
+# In operation/tools.py
+
+def _fn_my_compound(ui_graph, ...):
+    steps = []
+    steps.append(_fn_place_shape(ui_graph, "Rectangle_Tool"))
+    time.sleep(0.3)
+    steps.append(_fn_type_label("Hello"))
+    ...
+    return {"status": "ok", "tool": "my_compound", "steps": steps}
+
+N_MY_COMPOUND = ToolNode(
+    name="my_compound", fn=_fn_my_compound,
+    params=["..."], needs_ui_graph=True,
+    description="...",
+    children=[N_PLACE_SHAPE, N_TYPE_LABEL, ...],  # level auto-computed!
+)
+```
+
+Add to `ALL_NODES` and it's automatically in the catalog + LLM prompt.
