@@ -10,8 +10,8 @@ import json
 import time
 from typing import Any, Dict, List
 
-from . import config
-from .capture import screenshot
+from shared import config
+from shared.capture import screenshot
 from .llm import infer
 from .tools import dispatch
 

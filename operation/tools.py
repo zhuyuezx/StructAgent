@@ -24,7 +24,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import pyautogui
 
-from . import config
+from shared import config
 
 # ── Apply executor settings from config ───────────────────────────────────
 pyautogui.FAILSAFE = config.executor_failsafe()

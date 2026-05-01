@@ -5,12 +5,6 @@
   },
 
   "calibration": {
-    "ui_elements": {
-      "Rectangle_Tool": {"x": 20, "y": 290, "w": 30, "h": 30},
-      "Ellipse_Tool":   {"x": 165, "y": 290, "w": 30, "h": 30},
-      "Text_Tool":      {"x": 90, "y": 290, "w": 30, "h": 30},
-      "Arrow_Tool":     {"x": 160, "y": 510, "w": 30, "h": 30}
-    },
     "canvas_nodes": [],
     "canvas_edges": [],
     "empty_canvas_point": [600, 400]
@@ -28,5 +22,15 @@
     "type_interval": 0.03,
     "step_cooldown": 0.5,
     "countdown_seconds": 5
+  },
+
+  "explorer": {
+    "model": "qwen3-vl:4b",
+    "screen_scale": 2,
+    "sidebar_region": [0, 480, 380, 1120],
+    "icon_size_range": [20, 70],
+    "nms_distance": 20,
+    "label_timeout": 30,
+    "label_max_retries": 2
   }
 }

@@ -3,10 +3,10 @@
 Manual Feasibility Test — No LLM, hardcoded action sequences.
 
 Usage:
-    python test_drawio_manual.py --calibrate
-    python test_drawio_manual.py --run single --label "Cache"
-    python test_drawio_manual.py --run double
-    python test_drawio_manual.py --run single --dry-run
+    python operation/test_manual.py --calibrate
+    python operation/test_manual.py --run single --label "Cache"
+    python operation/test_manual.py --run double
+    python operation/test_manual.py --run single --dry-run
 """
 
 from __future__ import annotations
@@ -18,11 +18,12 @@ import sys
 import time
 from typing import Any, Dict, List
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add project root to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline import config
-from pipeline.capture import screenshot
-from pipeline.tools import place_shape, type_label, press_escape, click_empty_canvas
+from shared import config
+from shared.capture import screenshot
+from operation.tools import place_shape, type_label, press_escape, click_empty_canvas
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +49,7 @@ def run_calibrate() -> None:
 
     path = screenshot("calibration.png")
     print(f"\n✅ Screenshot → {path}")
-    print(f"   Edit config.json → calibration.ui_elements with measured coords.\n")
+    print(f"   Run exploration pipeline to auto-detect icons.\n")
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +124,6 @@ def seq_double(ui: Dict, dry_run: bool = False) -> List[dict]:
 def run_with_screenshots(name: str, seq_fn, ui: Dict, dry_run: bool = False) -> None:
     out = config.test_output_dir()
     before = screenshot(f"{name}_before.png")
-    # move before screenshot to test_output
     import shutil
     dest_before = os.path.join(out, f"{name}_before.png")
     shutil.copy2(before, dest_before)

@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 import ollama
 
-from . import config
+from shared import config
 from .tools import TOOL_CATALOG
 
 

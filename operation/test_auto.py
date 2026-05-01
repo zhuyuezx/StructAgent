@@ -3,26 +3,16 @@
 LLM Integration Test — Verify the LLM can pick correct tools.
 
 Levels:
-    1. single-step  — "Place a rectangle"  (just place_shape)
-    2. two-step     — "Place a rectangle labelled Cache"  (place_shape + type_label)
+    1. single-step  — "Place a rectangle"
+    2. two-step     — "Place a rectangle labelled Cache"
     3. multi-step   — Full sequence with escape + deselect
-    4. multi-shape  — Place multiple shapes
 
 Usage:
-    # Level 1 — simplest possible, just checks LLM returns a valid tool
-    python test_drawio_auto.py --level 1
-
-    # Level 2 — place + label
-    python test_drawio_auto.py --level 2
-
-    # Level 3 — full sequence
-    python test_drawio_auto.py --level 3
-
-    # Dry-run any level (LLM decides but no execution)
-    python test_drawio_auto.py --level 1 --dry-run
-
-    # Prompt-only (just print the prompt, no LLM call)
-    python test_drawio_auto.py --prompt-only
+    python operation/test_auto.py --level 1
+    python operation/test_auto.py --level 2
+    python operation/test_auto.py --level 3
+    python operation/test_auto.py --level 1 --dry-run
+    python operation/test_auto.py --prompt-only
 """
 
 from __future__ import annotations
@@ -34,12 +24,13 @@ import sys
 import time
 from typing import Any, Dict, List
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add project root to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline import config
-from pipeline.capture import screenshot
-from pipeline.llm import infer, build_prompt
-from pipeline.tools import dispatch, TOOL_CATALOG
+from shared import config
+from shared.capture import screenshot
+from operation.llm import infer, build_prompt
+from operation.tools import dispatch, TOOL_CATALOG
 
 
 # ---------------------------------------------------------------------------
@@ -84,16 +75,11 @@ def llm_step(
     step_num: int = 1,
     dry_run: bool = False,
 ) -> dict:
-    """
-    One perceive → reason → (optionally execute) cycle.
-
-    Returns the validated decision dict with an added 'executed' key.
-    """
+    """One perceive → reason → (optionally execute) cycle."""
     print(f"\n{'━' * 55}")
     print(f"  LLM Step {step_num}")
     print(f"{'━' * 55}")
 
-    # Ask the LLM
     decision = infer(task, ui_graph, img_path, history)
     info = _validate_decision(decision)
 
@@ -112,7 +98,6 @@ def llm_step(
         info["executed"] = False
         return info
 
-    # Execute
     if dry_run:
         print(f"  🔶 DRY RUN — would execute: {info['tool']}({info['params']})")
         info["executed"] = False
@@ -126,22 +111,24 @@ def llm_step(
             info["error"] = result["error"]
         else:
             info["executed"] = True
-        time.sleep(0.8)  # let draw.io catch up
+        time.sleep(0.8)
 
     return info
 
 
 # ---------------------------------------------------------------------------
-# Level 1: Single-step — "Place a rectangle"
+# Level definitions
 # ---------------------------------------------------------------------------
 
 LEVEL_1_TASK = "Place a rectangle on the canvas."
+LEVEL_2_TASK = "Place a rectangle and label it 'Cache'. Do one step at a time."
+LEVEL_3_TASK = (
+    "Place a rectangle labelled 'Database', then press Escape to exit "
+    "text editing, then click empty canvas to deselect. Do one step at a time."
+)
+
 
 def run_level_1(ui_graph: Dict, dry_run: bool = False) -> bool:
-    """
-    Simplest test: give the LLM a trivial task and verify it picks
-    `place_shape` with `tool_name: Rectangle_Tool`.
-    """
     print("\n" + "=" * 55)
     print("  LEVEL 1 — Single-step: Place a rectangle")
     print("=" * 55)
@@ -154,17 +141,7 @@ def run_level_1(ui_graph: Dict, dry_run: bool = False) -> bool:
     return ok
 
 
-# ---------------------------------------------------------------------------
-# Level 2: Two-step — "Place a rectangle labelled 'Cache'"
-# ---------------------------------------------------------------------------
-
-LEVEL_2_TASK = "Place a rectangle and label it 'Cache'. Do one step at a time."
-
 def run_level_2(ui_graph: Dict, dry_run: bool = False) -> bool:
-    """
-    Two-step: LLM should first pick place_shape, then type_label.
-    We feed the result of step 1 back as history for step 2.
-    """
     print("\n" + "=" * 55)
     print("  LEVEL 2 — Two-step: Place + label")
     print("=" * 55)
@@ -174,7 +151,6 @@ def run_level_2(ui_graph: Dict, dry_run: bool = False) -> bool:
 
     for step in range(1, 3):
         img = screenshot(f"auto_level2_step{step}.png")
-
         info = llm_step(
             LEVEL_2_TASK, ui_graph, img,
             history=history if history else None,
@@ -182,7 +158,6 @@ def run_level_2(ui_graph: Dict, dry_run: bool = False) -> bool:
         )
         results.append(info)
 
-        # Build history for next turn
         history.append({"role": "assistant", "content": json.dumps({
             "tool": info["tool"], "params": info["params"],
             "reasoning": info["reasoning"],
@@ -196,7 +171,6 @@ def run_level_2(ui_graph: Dict, dry_run: bool = False) -> bool:
         if info["is_special"] and info["tool"] == "task_complete":
             break
 
-    # Validate: step 1 should be place_shape, step 2 should be type_label
     ok = (
         len(results) >= 2
         and results[0]["tool"] == "place_shape"
@@ -206,30 +180,17 @@ def run_level_2(ui_graph: Dict, dry_run: bool = False) -> bool:
     return ok
 
 
-# ---------------------------------------------------------------------------
-# Level 3: Multi-step — Full workflow
-# ---------------------------------------------------------------------------
-
-LEVEL_3_TASK = (
-    "Place a rectangle labelled 'Database', then press Escape to exit "
-    "text editing, then click empty canvas to deselect. Do one step at a time."
-)
-
 def run_level_3(ui_graph: Dict, dry_run: bool = False) -> bool:
-    """
-    Multi-step: place → type → escape → deselect → task_complete.
-    """
     print("\n" + "=" * 55)
     print("  LEVEL 3 — Multi-step: Full workflow")
     print("=" * 55)
 
     history: List[Dict[str, Any]] = []
     results: List[dict] = []
-    max_turns = 8  # safety cap
+    max_turns = 8
 
     for step in range(1, max_turns + 1):
         img = screenshot(f"auto_level3_step{step}.png")
-
         info = llm_step(
             LEVEL_3_TASK, ui_graph, img,
             history=history if history else None,
@@ -252,16 +213,11 @@ def run_level_3(ui_graph: Dict, dry_run: bool = False) -> bool:
                 f"What's the next step? Use 'task_complete' if done."
             })
 
-    # Validate: at minimum place_shape and type_label should appear
     tools_used = [r["tool"] for r in results]
     ok = "place_shape" in tools_used and "type_label" in tools_used
     _print_verdict("Level 3", ok, results)
     return ok
 
-
-# ---------------------------------------------------------------------------
-# Pretty-print
-# ---------------------------------------------------------------------------
 
 def _print_verdict(level: str, ok: bool, data: Any) -> None:
     print(f"\n{'=' * 55}")
@@ -282,12 +238,9 @@ def _print_verdict(level: str, ok: bool, data: Any) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="LLM Integration Test for draw.io")
-    parser.add_argument("--level", type=int, choices=[1, 2, 3], default=1,
-                        help="Test level: 1=single-step, 2=two-step, 3=multi-step")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="LLM decides but tools are not executed.")
-    parser.add_argument("--prompt-only", action="store_true",
-                        help="Just print the LLM prompt and exit (no inference).")
+    parser.add_argument("--level", type=int, choices=[1, 2, 3], default=1)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--prompt-only", action="store_true")
     args = parser.parse_args()
 
     ui_graph = config.ui_graph()
