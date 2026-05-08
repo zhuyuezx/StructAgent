@@ -1,22 +1,21 @@
 """
 Config — Centralized configuration loader.
 
-Reads ``config.json`` (architectural settings) and ``icons.json``
-(auto-detected UI elements) from the project root.
+Reads ``config.json`` (architectural settings) and ``state/ui_graph.json``
+(persistent UI graph) from the project root.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
 
 # ---------------------------------------------------------------------------
-# Locate files relative to this file (project_root/<shared>/config.py)
+# Locate files relative to this file (project_root/core/config.py)
 # ---------------------------------------------------------------------------
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CONFIG_PATH = os.path.join(_PROJECT_ROOT, "config.json")
-_ICONS_PATH = os.path.join(_PROJECT_ROOT, "exploration", "icons.json")
 
 
 def _load(path: str) -> Dict[str, Any]:
@@ -53,37 +52,53 @@ def test_output_dir() -> str:
     return d
 
 
+def state_dir() -> str:
+    d = os.path.join(_PROJECT_ROOT, _cfg["paths"].get("state_dir", "state"))
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def ui_graph_path() -> str:
+    return os.path.join(state_dir(), _cfg["paths"].get("ui_graph_file", "ui_graph.json"))
+
+
 # ---------------------------------------------------------------------------
-# Icons data (from exploration/icons.json)
+# Domain plugin
 # ---------------------------------------------------------------------------
 
-def icons_path() -> str:
-    return _ICONS_PATH
+def domain() -> str:
+    """Active domain plugin name (e.g. 'drawio')."""
+    return _cfg.get("domain", "drawio")
 
 
-def load_icons() -> Dict[str, Any]:
-    """Load UI elements from icons.json.  Returns {} if file missing."""
-    if not os.path.exists(_ICONS_PATH):
+# ---------------------------------------------------------------------------
+# UI graph (from state/ui_graph.json)
+# ---------------------------------------------------------------------------
+
+def load_ui_state() -> Dict[str, Any]:
+    """Load the persisted UI graph file. Returns {} if missing."""
+    path = ui_graph_path()
+    if not os.path.exists(path):
         return {}
-    return _load(_ICONS_PATH)
+    return _load(path)
 
 
 def ui_graph() -> Dict[str, Any]:
     """
-    Return the UI graph dict merging icons.json elements with
+    Return the runtime UI graph dict, merging persisted UI state with
     config.json calibration data.
 
-    Schema:
+    Schema (Phase 0 — preserved from prior layout):
         {
           "UI_Elements": {"name": {"x": int, "y": int, ...}, ...},
           "Canvas_Nodes": [...],
           "Canvas_Edges": [...]
         }
     """
-    icons = load_icons()
+    state = load_ui_state()
     cal = _cfg.get("calibration", {})
     return {
-        "UI_Elements": icons.get("ui_elements", {}),
+        "UI_Elements": state.get("ui_elements", {}),
         "Canvas_Nodes": cal.get("canvas_nodes", []),
         "Canvas_Edges": cal.get("canvas_edges", []),
     }

@@ -1,12 +1,10 @@
 """
-LLM — Language model inference module.
+Executor agent — picks the next tool given a task and current UI graph.
 
 Constructs a coordinate-free prompt from the tool catalog and detected
-element names, sends it to the local Qwen model via Ollama, and parses
-the JSON response.
-
-The LLM never sees pixel coordinates — it only picks named tools and
-references elements by name/id.
+element names, sends it to a local LLM via Ollama, and parses the JSON
+response. The executor never sees pixel coordinates — it only picks
+named tools and references elements by name/id.
 """
 
 from __future__ import annotations
@@ -17,8 +15,8 @@ from typing import Any, Dict, List, Optional
 
 import ollama
 
-from shared import config
-from .tools import TOOL_CATALOG
+from core import config
+from core.tools import TOOL_CATALOG
 
 
 # ---------------------------------------------------------------------------
@@ -178,10 +176,10 @@ def infer(
         "images": [image_bytes],
     })
 
-    print(f"[LLM] Querying {model} …")
+    print(f"[EXECUTOR] Querying {model} …")
     response = ollama.chat(model=model, messages=messages)
     raw = response["message"]["content"]
-    print(f"[LLM] Raw response:\n{raw}")
+    print(f"[EXECUTOR] Raw response:\n{raw}")
 
     result = parse_response(raw)
 
@@ -189,7 +187,7 @@ def infer(
     if "tool" not in result and "action" in result:
         result["tool"] = result.pop("action")
     if "tool" not in result:
-        raise ValueError(f"LLM response missing 'tool' key: {result}")
+        raise ValueError(f"Executor response missing 'tool' key: {result}")
 
-    print(f"[LLM] Decided: {result['tool']}  {result.get('params', {})}")
+    print(f"[EXECUTOR] Decided: {result['tool']}  {result.get('params', {})}")
     return result

@@ -11,9 +11,9 @@ Usage:
 import argparse
 import json
 
-from shared import config
-from shared.capture import screenshot
-from operation.pipeline import run
+from core import config
+from core.capture import screenshot
+from core.pipeline import run
 
 
 def main() -> None:

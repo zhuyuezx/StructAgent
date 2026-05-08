@@ -1,20 +1,23 @@
 {
+  "domain": "drawio",
   "paths": {
     "screenshots_dir": "screenshots",
-    "test_output_dir": "test_output"
+    "test_output_dir": "test_output",
+    "state_dir": "state",
+    "ui_graph_file": "ui_graph.json"
   },
-
   "calibration": {
     "canvas_nodes": [],
     "canvas_edges": [],
-    "empty_canvas_point": [600, 400]
+    "empty_canvas_point": [
+      600,
+      400
+    ]
   },
-
   "llm": {
     "model": "qwen3.5:35b",
     "max_steps": 10
   },
-
   "executor": {
     "failsafe": true,
     "pause": 0.15,
@@ -23,12 +26,19 @@
     "step_cooldown": 0.5,
     "countdown_seconds": 5
   },
-
   "explorer": {
     "model": "qwen3-vl:4b",
     "screen_scale": 2,
-    "sidebar_region": [0, 480, 380, 1120],
-    "icon_size_range": [20, 70],
+    "sidebar_region": [
+      0,
+      480,
+      380,
+      1120
+    ],
+    "icon_size_range": [
+      20,
+      70
+    ],
     "nms_distance": 20,
     "label_timeout": 30,
     "label_max_retries": 2

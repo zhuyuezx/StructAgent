@@ -10,7 +10,7 @@ import os
 
 import pyautogui
 
-from . import config
+from core import config
 
 
 def screenshot(filename: str = "state.png") -> str:

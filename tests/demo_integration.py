@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-Integration Demo — Uses exploration-detected icons with the ToolNode tree.
+Integration Demo — Uses perception-detected icons with the ToolNode tree.
 
 Demonstrates:
-    1. Load icons auto-detected by exploration (icons.json)
+    1. Load icons auto-detected by perception (state/ui_graph.json)
     2. Use L0 leaf tools step-by-step
     3. Use compound tools (auto-leveled from children) for single-call ops
     4. Print the full tool tree
 
 Usage:
-    python operation/demo_integration.py                   # compound demo
-    python operation/demo_integration.py --mode leaf       # leaf step-by-step
-    python operation/demo_integration.py --mode compound   # compound
-    python operation/demo_integration.py --mode both       # both
-    python operation/demo_integration.py --dry-run         # print plan only
-    python operation/demo_integration.py --tree            # show tool tree
+    python tests/demo_integration.py                   # compound demo
+    python tests/demo_integration.py --mode leaf       # leaf step-by-step
+    python tests/demo_integration.py --mode compound   # compound
+    python tests/demo_integration.py --mode both       # both
+    python tests/demo_integration.py --dry-run         # print plan only
+    python tests/demo_integration.py --tree            # show tool tree
 """
 
 from __future__ import annotations
@@ -28,9 +28,9 @@ from typing import Any, Dict, List
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared import config
-from shared.capture import screenshot
-from operation.tools import (
+from core import config
+from core.capture import screenshot
+from core.tools import (
     TOOL_CATALOG, print_tree, dispatch,
     place_shape, type_label, press_escape, click_empty_canvas,
     place_and_label,
@@ -56,7 +56,7 @@ def _countdown(seconds: int | None = None) -> None:
 def demo_leaf(ui: Dict[str, Any], dry_run: bool = False) -> List[dict]:
     """
     L0 leaf tools: step-by-step place + label.
-    This is what the LLM does at runtime — one tool per turn.
+    This is what the executor agent does at runtime — one tool per turn.
     """
     print("\n" + "=" * 55)
     print("  DEMO — Leaf tools (step-by-step)")
@@ -105,7 +105,7 @@ def demo_compound(ui: Dict[str, Any], dry_run: bool = False) -> List[dict]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Integration demo: exploration → operation")
+    p = argparse.ArgumentParser(description="Integration demo: perception → operation")
     p.add_argument("--mode", choices=["leaf", "compound", "both"], default="compound")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--tree", action="store_true", help="Print the tool tree and exit")
@@ -116,7 +116,7 @@ def main() -> None:
         print_tree()
         ui = config.ui_graph()
         elements = list(ui["UI_Elements"].keys())
-        print(f"\n  Shapes from icons.json: {len(elements)}")
+        print(f"\n  Shapes from ui_graph.json: {len(elements)}")
         for e in elements:
             print(f"    - {e}")
         print()
@@ -125,13 +125,13 @@ def main() -> None:
     # ── Validate icons ────────────────────────────────────────────────
     ui = config.ui_graph()
     elements = list(ui["UI_Elements"].keys())
-    print(f"  Loaded {len(elements)} shapes from icons.json")
+    print(f"  Loaded {len(elements)} shapes from ui_graph.json")
 
     needed = {"Rectangle_Tool", "Diamond_Tool"}
     missing = needed - set(elements)
     if missing:
         print(f"\n  ❌ Missing required shapes: {missing}")
-        print(f"     Run: python exploration/test_collect_icons.py --detect --label --write")
+        print(f"     Run: python tests/test_collect_icons.py --detect --label --write")
         sys.exit(1)
 
     # ── Run ───────────────────────────────────────────────────────────

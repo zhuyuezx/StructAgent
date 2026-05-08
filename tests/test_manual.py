@@ -3,16 +3,15 @@
 Manual Feasibility Test — No LLM, hardcoded action sequences.
 
 Usage:
-    python operation/test_manual.py --calibrate
-    python operation/test_manual.py --run single --label "Cache"
-    python operation/test_manual.py --run double
-    python operation/test_manual.py --run single --dry-run
+    python tests/test_manual.py --calibrate
+    python tests/test_manual.py --run single --label "Cache"
+    python tests/test_manual.py --run double
+    python tests/test_manual.py --run single --dry-run
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import time
@@ -21,9 +20,9 @@ from typing import Any, Dict, List
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared import config
-from shared.capture import screenshot
-from operation.tools import place_shape, type_label, press_escape, click_empty_canvas
+from core import config
+from core.capture import screenshot
+from core.tools import place_shape, type_label, press_escape, click_empty_canvas
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +48,7 @@ def run_calibrate() -> None:
 
     path = screenshot("calibration.png")
     print(f"\n✅ Screenshot → {path}")
-    print(f"   Run exploration pipeline to auto-detect icons.\n")
+    print(f"   Run perception pipeline to auto-detect icons.\n")
 
 
 # ---------------------------------------------------------------------------

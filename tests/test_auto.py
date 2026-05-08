@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Integration Test — Verify the LLM can pick correct tools.
+LLM Integration Test — Verify the executor agent can pick correct tools.
 
 Levels:
     1. single-step  — "Place a rectangle"
@@ -8,11 +8,11 @@ Levels:
     3. multi-step   — Full sequence with escape + deselect
 
 Usage:
-    python operation/test_auto.py --level 1
-    python operation/test_auto.py --level 2
-    python operation/test_auto.py --level 3
-    python operation/test_auto.py --level 1 --dry-run
-    python operation/test_auto.py --prompt-only
+    python tests/test_auto.py --level 1
+    python tests/test_auto.py --level 2
+    python tests/test_auto.py --level 3
+    python tests/test_auto.py --level 1 --dry-run
+    python tests/test_auto.py --prompt-only
 """
 
 from __future__ import annotations
@@ -27,10 +27,10 @@ from typing import Any, Dict, List
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared import config
-from shared.capture import screenshot
-from operation.llm import infer, build_prompt
-from operation.tools import dispatch, TOOL_CATALOG
+from core import config
+from core.capture import screenshot
+from core.agents.executor import infer, build_prompt
+from core.tools import dispatch, TOOL_CATALOG
 
 
 # ---------------------------------------------------------------------------

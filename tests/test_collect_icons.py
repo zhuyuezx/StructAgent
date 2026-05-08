@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Test icon collection — verify the explorer pipeline can detect sidebar icons.
+Test icon collection — verify the perception pipeline can detect sidebar icons.
 
 Usage:
-    python exploration/test_collect_icons.py --detect
-    python exploration/test_collect_icons.py --detect --label
-    python exploration/test_collect_icons.py --detect --label --write
-    python exploration/test_collect_icons.py --detect --image screenshots/explore.png
+    python tests/test_collect_icons.py --detect
+    python tests/test_collect_icons.py --detect --label
+    python tests/test_collect_icons.py --detect --label --write
+    python tests/test_collect_icons.py --detect --image screenshots/explore.png
 """
 
 from __future__ import annotations
@@ -19,9 +19,11 @@ import time
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared import config
-from shared.capture import screenshot
-from exploration.explorer import detect_icons, annotate, label_icons, write_icons
+from core import config
+from core.capture import screenshot
+from core.perception.detect import detect_icons, annotate
+from core.perception.label import label_icons
+from core.state.ui_graph import save_ui_state
 
 
 def _countdown(seconds: int | None = None) -> None:
@@ -36,7 +38,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Test draw.io icon detection")
     p.add_argument("--detect", action="store_true", help="Run icon detection.")
     p.add_argument("--label", action="store_true", help="Label icons with LLM.")
-    p.add_argument("--write", action="store_true", help="Write results to icons.json.")
+    p.add_argument("--write", action="store_true", help="Write results to ui_graph.json.")
     p.add_argument("--image", type=str, default=None,
                    help="Use existing screenshot instead of capturing.")
     args = p.parse_args()
@@ -78,14 +80,14 @@ def main() -> None:
         ann_labeled = os.path.join(out_dir, "labeled_icons.png")
         annotate(img_path, icons, ann_labeled)
 
-    # 5. Write to icons.json (optional)
+    # 5. Write to ui_graph.json (optional)
     if args.write:
         if not args.label:
             print("\n⚠️  --write requires --label (icons need labels first)")
             return
         print()
-        write_icons(icons)
-        print(f"   Verify: cat exploration/icons.json | python3 -m json.tool")
+        save_ui_state(icons)
+        print(f"   Verify: cat state/ui_graph.json | python3 -m json.tool")
 
     # Summary
     print(f"\n{'=' * 50}")

@@ -1,7 +1,7 @@
 """
 Pipeline — Agentic control loop.
 
-    Capture → LLM Decide → Tool Execute → (repeat)
+    Capture → Executor decides → Tool dispatches → (repeat)
 """
 
 from __future__ import annotations
@@ -10,10 +10,10 @@ import json
 import time
 from typing import Any, Dict, List
 
-from shared import config
-from shared.capture import screenshot
-from .llm import infer
-from .tools import dispatch
+from core import config
+from core.capture import screenshot
+from core.agents.executor import infer
+from core.tools import dispatch
 
 
 def run(
