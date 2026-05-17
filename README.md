@@ -9,12 +9,12 @@ Perception Pipeline:
   Screenshot → OpenCV detect → VLM label → state/ui_graph.json
 
 Operation Pipeline:
-  User Task → Executor agent (picks tool from tree) → dispatch() → pyautogui
-                                                          ↑
-                                              ui_graph.json (coordinates)
+  User Task → screenshot → observe canvas → Executor agent → dispatch() → pyautogui
+                                ↑                              │
+                                └──── verify post-action screenshot
 ```
 
-The executor agent **never sees pixel coordinates** — it picks named tools. The tool tree handles coordinate resolution.
+The executor agent **never sees pixel coordinates** — it picks named tools. Stable sidebar tool coordinates come from `state/ui_graph.json`; dynamic canvas nodes are observed from the latest screenshot at runtime. The tool tree handles coordinate resolution.
 
 ## Hierarchical tool tree
 
@@ -58,10 +58,12 @@ main.py                      ← CLI entry point
 core/                        ← Framework — domain-agnostic
   capture.py                 ← Screenshot capture
   config.py                  ← Loads config.json + state/ui_graph.json
-  pipeline.py                ← Agentic control loop (perceive → reason → act)
+  pipeline.py                ← Agentic control loop (perceive → observe → reason → act → verify)
+  verification.py            ← Post-action checks against screenshots + observed graph
   agents/
     executor.py              ← LLM tool selection (no coords)
   perception/
+    canvas.py                ← Runtime canvas node observation + graph summaries
     detect.py                ← OpenCV element detection + annotation
     label.py                 ← VLM crop labeling
   state/
@@ -79,6 +81,8 @@ state/
   ui_graph.json              ← Persistent UI graph (perception output)
 
 tests/                       ← Integration test scripts
+  test_canvas.py             ← Non-GUI canvas observer regression tests
+  test_pipeline_rescan.py    ← request_rescan refresh regression test
   test_collect_icons.py      ← Perception pipeline test
   test_manual.py             ← No-LLM hardcoded sequences
   test_auto.py               ← Full LLM integration tests (Levels 1–3)
@@ -132,6 +136,9 @@ python tests/demo_integration.py --tree
 # Dry-run leaf + compound sequences (no mouse movement)
 python tests/demo_integration.py --mode both --dry-run
 python tests/test_manual.py --run single --dry-run
+
+# Reliability-layer unit tests (no Draw.io, no Ollama, no real pyautogui)
+python -m unittest tests.test_canvas tests.test_pipeline_rescan
 ```
 
 ### T3 — Perception (screenshot + OpenCV, no GUI focus needed)
@@ -175,10 +182,13 @@ python tests/demo_integration.py --mode both
 # Capture state + print ui_graph (no actions)
 python main.py --screenshot
 
-# Run the full perceive → reason → act loop
+# Run the full perceive → observe → reason → act → verify loop
 python main.py --task "Draw a rectangle labelled Cache"
 python main.py --task "Draw a rectangle labelled Cache" --dry-run
+python main.py --task "Draw a rectangle labelled Cache" --trace
 ```
+
+`--trace` writes one JSON file per step under `test_output/runs/<timestamp>/`, including screenshot paths, prompt text, graph summaries, model decision, dispatch result, verification result, and history.
 
 ---
 
@@ -186,8 +196,10 @@ python main.py --task "Draw a rectangle labelled Cache" --dry-run
 
 | File | Owner | Content |
 |------|-------|---------|
-| `config.json` | Manual | Domain selection, paths, models, executor + perception params |
-| `state/ui_graph.json` | Perception | Auto-detected element positions and labels |
+| `config.json` | Manual | Domain selection, paths, models, executor timing, `sidebar_region`, `canvas_region`, and perception params |
+| `state/ui_graph.json` | Perception | Persistent sidebar tool positions and labels |
+
+Runtime canvas nodes are not written into `config.json`. During the main pipeline, `core/perception/canvas.py` rebuilds `Canvas_Nodes` from the current screenshot as approximate `Observed_Node_N` entries.
 
 ---
 
@@ -226,10 +238,11 @@ register(N_MY_COMPOUND)
 
 ---
 
-## Known issues (Phase 1 targets)
+## Current limitations / next targets
 
 | Issue | Root cause | Fix |
 |---|---|---|
 | Uppercase letters drop during `type_label` | `pyautogui.typewrite` doesn't handle Shift; "Database" types as "atabase" | Replace with `pyautogui.write()` |
-| `edit_label` / `delete_node` / `move_and_deselect` always fail | `Canvas_Nodes` is never populated — no canvas perception | Implement Perceiver agent (Phase 1) |
-| Sidebar label ambiguity (`Rectangle_Tool_1..6`) | VLM labels small crops without group context | Group-aware detection (Phase 3) |
+| Text verification is weak | OCR/VLM text reading is not implemented for canvas labels | Add OCR/VLM label reading to `core/perception/canvas.py` |
+| Edge/connector state is empty | Canvas observer only detects simple closed shapes in v1 | Add edge detection and node matching across steps |
+| Sidebar label ambiguity (`Rectangle_Tool_1..6`) | VLM labels small crops without group context | Current prompt groups ambiguous families; future work should add tooltip-based disambiguation |

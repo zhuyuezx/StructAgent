@@ -5,6 +5,7 @@ draw.io Hybrid Agent — Entry Point.
 Usage:
     python main.py --task "Add a Cache rectangle"
     python main.py --task "Add a Cache rectangle" --dry-run
+    python main.py --task "Add a Cache rectangle" --trace
     python main.py --screenshot
 """
 
@@ -21,6 +22,8 @@ def main() -> None:
     parser.add_argument("--task", "-t", type=str,
                         default="Draw a rectangle labelled 'Cache'")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--trace", action="store_true",
+                        help="Write per-step diagnostics to test_output/runs/.")
     parser.add_argument("--screenshot", action="store_true",
                         help="Capture a screenshot and exit.")
     args = parser.parse_args()
@@ -31,7 +34,7 @@ def main() -> None:
         print(json.dumps(graph, indent=2))
         return
 
-    log = run(args.task, dry_run=args.dry_run)
+    log = run(args.task, dry_run=args.dry_run, trace=args.trace)
     print(f"\nDone — {len(log)} action(s).")
 
 

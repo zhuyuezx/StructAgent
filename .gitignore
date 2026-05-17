@@ -1,5 +1,40 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+
+# Generated runtime artifacts
 screenshots/
 test_output/
-__pycache__/
-.env
-*.pyc
+*.log
+
+# OS / editor noise
+.DS_Store
+.AppleDouble
+.LSOverride
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local scratch files
+tmp/
+temp/
+PLAN.md
+CLAUDE.md

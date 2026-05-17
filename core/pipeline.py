@@ -7,13 +7,17 @@ Pipeline — Agentic control loop.
 from __future__ import annotations
 
 import json
+import os
 import time
+from datetime import datetime
 from typing import Any, Dict, List
 
 from core import config
 from core.capture import screenshot
-from core.agents.executor import infer
+from core.agents.executor import build_prompt, infer
+from core.perception.canvas import observe_canvas, summarize_graph
 from core.tools import dispatch
+from core.verification import verify_action
 
 
 def run(
@@ -21,14 +25,18 @@ def run(
     *,
     ui_graph: Dict[str, Any] | None = None,
     dry_run: bool = False,
+    trace: bool = False,
 ) -> List[Dict[str, Any]]:
     """Execute the perceive → reason → act loop."""
     max_steps = config.llm_max_steps()
     cooldown = config.step_cooldown()
-    graph = ui_graph or config.ui_graph()
+    base_graph = ui_graph or config.ui_graph()
+    trace_dir = _make_trace_dir() if trace else None
 
     print("=" * 60)
     print(f"  PIPELINE — {task}")
+    if trace_dir:
+        print(f"  TRACE   — {trace_dir}")
     print("=" * 60)
 
     log: List[Dict[str, Any]] = []
@@ -38,6 +46,8 @@ def run(
         print(f"\n{'─' * 50}  Step {step}/{max_steps}")
 
         img_path = screenshot(f"step_{step:02d}.png")
+        graph = _runtime_graph(img_path, base_graph)
+        graph_before = graph
         decision = infer(task, graph, img_path, history or None)
         tool_name = decision.get("tool", "")
         params = decision.get("params", {})
@@ -46,24 +56,85 @@ def run(
 
         if tool_name == "request_rescan":
             print("[PIPELINE] Rescan requested")
+            entry = {
+                **decision,
+                "task": task,
+                "step": step,
+                "screenshot": img_path,
+                "ui_graph_before": summarize_graph(graph_before),
+                "prompt": build_prompt(graph_before),
+                "result": {"status": "rescanned"},
+                "dispatch_result": {"status": "rescanned"},
+            }
+            log.append(entry)
+            _write_trace(trace_dir, step, entry, history)
             continue
         if tool_name == "task_complete":
             print("[PIPELINE] Task complete ✓")
-            log.append(decision)
+            entry = {
+                **decision,
+                "task": task,
+                "step": step,
+                "screenshot": img_path,
+                "ui_graph_before": summarize_graph(graph_before),
+                "prompt": build_prompt(graph_before),
+                "dispatch_result": None,
+            }
+            log.append(entry)
+            _write_trace(trace_dir, step, entry, history)
             break
 
         if dry_run:
             print(f"[PIPELINE] DRY RUN: {tool_name}({params})")
             result = {"status": "dry_run"}
+            after_img = img_path
+            graph_after = graph_before
+            verification = {
+                "passed": True,
+                "confidence": "skipped",
+                "reason": "dry_run",
+                "before_node_count": len(graph_before.get("Canvas_Nodes", [])),
+                "after_node_count": len(graph_after.get("Canvas_Nodes", [])),
+                "canvas_changed": False,
+            }
         else:
             result = dispatch(tool_name, params, ui_graph=graph)
+            time.sleep(cooldown)
+            after_img = screenshot(f"step_{step:02d}_after.png")
+            graph_after = _runtime_graph(after_img, base_graph)
+            verification = verify_action(
+                tool_name, params, graph_before, graph_after,
+                img_path, after_img, result,
+            )
 
-        log.append({**decision, "result": result, "step": step})
+        entry = {
+            **decision,
+            "task": task,
+            "result": result,
+            "dispatch_result": result,
+            "verification": verification,
+            "step": step,
+            "screenshot": img_path,
+            "post_action_screenshot": after_img,
+            "ui_graph_before": summarize_graph(graph_before),
+            "ui_graph_after": summarize_graph(graph_after),
+            "prompt": build_prompt(graph_before),
+        }
+        log.append(entry)
         history.append({
             "role": "user",
-            "content": f"Tool '{tool_name}' executed. Continue or signal 'task_complete'.",
+            "content": (
+                f"Tool '{tool_name}' executed with status "
+                f"'{result.get('status')}'. Verification: "
+                f"{verification.get('reason')} "
+                f"(passed={verification.get('passed')}, "
+                f"observed nodes={verification.get('after_node_count')}). "
+                "Continue or signal 'task_complete'."
+            ),
         })
-        time.sleep(cooldown)
+        _write_trace(trace_dir, step, entry, history)
+        if dry_run:
+            time.sleep(cooldown)
     else:
         print(f"\n[PIPELINE] Max steps ({max_steps}) reached.")
 
@@ -72,3 +143,39 @@ def run(
         print(f"  Step {e.get('step', '?'):>2}: {e.get('tool')}  {e.get('params', {})}")
     print("=" * 60)
     return log
+
+
+def _runtime_graph(screenshot_path: str, base_graph: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "UI_Elements": base_graph.get("UI_Elements", {}),
+        "Canvas_Nodes": observe_canvas(screenshot_path),
+        "Canvas_Edges": base_graph.get("Canvas_Edges", []),
+    }
+
+
+def _make_trace_dir() -> str:
+    root = os.path.join(config.test_output_dir(), "runs")
+    os.makedirs(root, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    path = os.path.join(root, stamp)
+    os.makedirs(path, exist_ok=False)
+    return path
+
+
+def _write_trace(
+    trace_dir: str | None,
+    step: int,
+    entry: Dict[str, Any],
+    history: List[Dict[str, Any]],
+) -> None:
+    if not trace_dir:
+        return
+    path = os.path.join(trace_dir, f"step_{step:02d}.json")
+    payload = {
+        "task": entry.get("task"),
+        "step": step,
+        "history": history,
+        **entry,
+    }
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)

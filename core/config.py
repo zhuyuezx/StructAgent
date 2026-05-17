@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 # ---------------------------------------------------------------------------
 # Locate files relative to this file (project_root/core/config.py)
@@ -83,7 +83,11 @@ def load_ui_state() -> Dict[str, Any]:
     return _load(path)
 
 
-def ui_graph() -> Dict[str, Any]:
+def ui_graph(
+    *,
+    screenshot_path: str | None = None,
+    canvas_nodes: List[Dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
     """
     Return the runtime UI graph dict, merging persisted UI state with
     config.json calibration data.
@@ -97,9 +101,14 @@ def ui_graph() -> Dict[str, Any]:
     """
     state = load_ui_state()
     cal = _cfg.get("calibration", {})
+    if canvas_nodes is None:
+        canvas_nodes = cal.get("canvas_nodes", [])
+        if screenshot_path is not None:
+            from core.perception.canvas import observe_canvas
+            canvas_nodes = observe_canvas(screenshot_path)
     return {
         "UI_Elements": state.get("ui_elements", {}),
-        "Canvas_Nodes": cal.get("canvas_nodes", []),
+        "Canvas_Nodes": canvas_nodes,
         "Canvas_Edges": cal.get("canvas_edges", []),
     }
 
@@ -159,6 +168,13 @@ def screen_scale() -> int:
 
 def sidebar_region() -> Tuple[int, int, int, int]:
     r = _cfg.get("explorer", {}).get("sidebar_region", [0, 480, 380, 1120])
+    return tuple(r)
+
+
+def canvas_region() -> Tuple[int, int, int, int] | None:
+    r = _cfg.get("explorer", {}).get("canvas_region")
+    if r is None:
+        return None
     return tuple(r)
 
 

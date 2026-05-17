@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 import ollama
 
 from core import config
+from core.perception.canvas import tool_families
 from core.tools import TOOL_CATALOG
 
 
@@ -46,11 +47,31 @@ def _element_summary(ui_graph: Dict[str, Any]) -> str:
         for t in tools:
             parts.append(f"- `{t}`")
 
+        families = tool_families(ui_graph.get("UI_Elements", {}))
+        if families:
+            parts.append("\n### Ambiguous Sidebar Families")
+            parts.append(
+                "Use the exact tool names below with `place_shape`; "
+                "`Rectangle_Tool` is the default rectangle candidate."
+            )
+            for family, candidates in families.items():
+                joined = ", ".join(f"`{c}`" for c in candidates)
+                parts.append(f"- `{family}` candidates: {joined}")
+
     nodes = ui_graph.get("Canvas_Nodes", [])
+    parts.append("\n### Observed Canvas")
     if nodes:
-        parts.append("\n### Canvas Nodes")
+        parts.append(f"Visible node count: {len(nodes)}")
         for n in nodes:
-            parts.append(f"- id=`{n['id']}`, text=`{n.get('text', '')}`")
+            text = n.get("text", "")
+            confidence = n.get("confidence")
+            source = n.get("source", "unknown")
+            parts.append(
+                f"- id=`{n['id']}`, text=`{text}`, "
+                f"confidence=`{confidence}`, source=`{source}`"
+            )
+    else:
+        parts.append("Visible node count: 0")
 
     edges = ui_graph.get("Canvas_Edges", [])
     if edges:
