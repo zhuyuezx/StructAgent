@@ -70,7 +70,7 @@ python tests/test_auto.py --level 2                # two-step: place + label
 python tests/test_auto.py --level 3                # multi-step: full workflow
 python tests/test_auto.py --level 3 --dry-run
 python tests/test_auto.py --prompt-only            # print LLM prompt without executing
-python -m unittest tests.test_canvas tests.test_pipeline_rescan
+python -m unittest tests.test_canvas tests.test_canvas_tracker tests.test_tool_families tests.test_verification tests.test_pipeline_rescan
 ```
 
 ## Architecture
@@ -80,7 +80,8 @@ main.py (CLI entry point)
     └── core/pipeline.py       (agentic loop — perceive/reason/act/verify, up to max_steps)
             ├── core/capture.py            (screenshot to disk)
             ├── core/agents/executor.py    (Ollama query → JSON tool decision)
-            ├── core/perception/canvas.py  (runtime canvas node observation)
+            ├── core/perception/canvas.py  (runtime canvas observation + overlays)
+            ├── core/perception/tracker.py (stable in-run canvas node IDs)
             ├── core/verification.py       (post-action verification)
             └── core/tools/__init__.py     (loads registry + primitives + domain plugin)
                     ├── core/tools/registry.py      (ToolNode, register, dispatch)
@@ -91,7 +92,8 @@ core/config.py        (typed accessors for config.json + state/ui_graph.json)
 config.json           (domain, paths, calibration coords, LLM settings, executor timing, explorer settings)
 
 core/perception/
-    canvas.py             (OpenCV canvas node observation + graph summaries)
+    canvas.py             (OpenCV canvas node observation + graph summaries + debug overlays)
+    tracker.py            (stable in-run canvas node IDs)
     detect.py             (OpenCV icon detection)
     label.py              (VLM labeling via Ollama)
 
@@ -103,6 +105,9 @@ state/
 
 tests/
     test_canvas.py        (non-LLM canvas observer tests with synthetic screenshots)
+    test_canvas_tracker.py (stable canvas ID tests)
+    test_tool_families.py (manual/default family tests)
+    test_verification.py  (action-level verification tests)
     test_pipeline_rescan.py (rescan refresh regression test)
     test_collect_icons.py (perception pipeline test — detect + label + write)
     test_manual.py        (no-LLM manual action test)
@@ -158,10 +163,15 @@ Tools are split across three files and self-register at import time:
 
 **`canvas.py`** — `observe_canvas(screenshot_path)`:
 - Crops screenshot to `explorer.canvas_region`
-- Uses dark-stroke OpenCV contours so light grid lines are suppressed
+- Uses theme-aware OpenCV contours so light/dark grid lines are suppressed
 - Returns approximate runtime nodes like `Observed_Node_1` with logical center/size, confidence, stroke density, rectangularity, and source metadata
-- `annotate_canvas()` writes visual debug images showing detected boxes
-- Also provides graph summaries and ambiguous sidebar tool family grouping for traces/prompts
+- `observe_canvas_detailed()` returns accepted candidates, rejected candidates, crop metadata, and theme/polarity for traces
+- `annotate_canvas()` writes visual debug images showing crop bounds, accepted boxes, rejected boxes, and tracked motion arrows
+- Also provides graph summaries and configured/default sidebar tool family grouping for traces/prompts
+
+**`tracker.py`** — `CanvasTracker`:
+- Keeps `Observed_Node_N` stable within a single pipeline run by matching raw detections using center distance, size similarity, and bounding-box IoU
+- Records matched, new, and deleted tracks in trace diagnostics
 
 **`core/state/ui_graph.py`** — `save_ui_state(icons)` formats labeled icons as `{name}_Tool` entries and writes to `state/ui_graph.json`.
 
@@ -171,8 +181,8 @@ Prompt includes: available tools (as markdown table), named sidebar tools, ambig
 
 ### core/verification.py: post-action checks
 
-`verify_action()` compares pre-action and post-action screenshots/observed graphs. For `place_shape`, `place_and_label`, and `place_shape_then_edit_label`, node-count increase is a strong pass; image change without count increase is a weak pass. For drag tools, canvas image change is a strong pass and stable node count is a weak pass. For `type_label`, image change is a weak pass because OCR is not implemented yet. `text_placement` is currently recorded as `"unknown"`. Selection-only actions such as `press_escape` and `click_empty_canvas` are non-blocking in v1.
+`verify_action()` compares pre-action and post-action screenshots/observed graphs. Placement tools strongly pass when a new tracked node appears. Drag tools strongly pass when the same tracked node moves in the expected direction. `delete_node` strongly passes when the target tracked node disappears or node count decreases. For `type_label`, image change is a weak pass because OCR is not implemented yet. `text_placement` is currently recorded as `"unknown"`. Selection-only actions such as `press_escape` and `click_empty_canvas` are non-blocking in v1.
 
 ### Trace diagnostics
 
-`python main.py --task "Add a rectangle labelled Cache" --trace` writes one JSON file per step under `test_output/runs/<timestamp>/`. Each step includes screenshot paths, canvas annotation image paths, prompt text, UI graph summaries, decision, dispatch result, verification result, and history.
+`python main.py --task "Add a rectangle labelled Cache" --trace` writes one JSON file per step under `test_output/runs/<timestamp>/`. Each step includes screenshot paths, canvas annotation image paths, accepted/rejected canvas candidates, tracking diagnostics, tool-family defaults, prompt text, UI graph summaries, decision, dispatch result, verification result, and history.

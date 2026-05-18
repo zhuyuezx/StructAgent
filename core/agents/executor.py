@@ -47,16 +47,17 @@ def _element_summary(ui_graph: Dict[str, Any]) -> str:
         for t in tools:
             parts.append(f"- `{t}`")
 
-        families = tool_families(ui_graph.get("UI_Elements", {}))
+        families = ui_graph.get("Tool_Families") or tool_families(ui_graph.get("UI_Elements", {}))
         if families:
             parts.append("\n### Ambiguous Sidebar Families")
             parts.append(
-                "Use the exact tool names below with `place_shape`; "
-                "`Rectangle_Tool` is the default rectangle candidate."
+                "Use family defaults for common shapes, but dispatch exact tool names."
             )
-            for family, candidates in families.items():
+            for family, spec in families.items():
+                candidates = spec.get("candidates", [])
+                default = spec.get("default")
                 joined = ", ".join(f"`{c}`" for c in candidates)
-                parts.append(f"- `{family}` candidates: {joined}")
+                parts.append(f"- `{family}` default: `{default}`; candidates: {joined}")
 
     nodes = ui_graph.get("Canvas_Nodes", [])
     parts.append("\n### Observed Canvas")

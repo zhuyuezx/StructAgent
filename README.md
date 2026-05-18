@@ -9,12 +9,12 @@ Perception Pipeline:
   Screenshot → OpenCV detect → VLM label → state/ui_graph.json
 
 Operation Pipeline:
-  User Task → screenshot → observe canvas → Executor agent → dispatch() → pyautogui
-                                ↑                              │
-                                └──── verify post-action screenshot
+  User Task → screenshot → observe canvas → track nodes → Executor agent → dispatch() → pyautogui
+                                                ↑                              │
+                                                └──── verify post-action state
 ```
 
-The executor agent **never sees pixel coordinates** — it picks named tools. Stable sidebar tool coordinates come from `state/ui_graph.json`; dynamic canvas nodes are observed from the latest screenshot at runtime. The tool tree handles coordinate resolution.
+The executor agent **never sees pixel coordinates** — it picks named tools. Stable sidebar tool coordinates come from `state/ui_graph.json`; dynamic canvas nodes are observed from screenshots and tracked with stable in-run IDs. The tool tree handles coordinate resolution.
 
 ## Hierarchical tool tree
 
@@ -76,7 +76,8 @@ core/                        ← Framework — domain-agnostic
   agents/
     executor.py              ← LLM tool selection (no coords)
   perception/
-    canvas.py                ← Runtime canvas node observation + graph summaries
+    canvas.py                ← Runtime canvas node observation, debug overlays, graph summaries
+    tracker.py               ← Stable in-run Canvas_Nodes IDs
     detect.py                ← OpenCV element detection + annotation
     label.py                 ← VLM crop labeling
   state/
@@ -95,6 +96,9 @@ state/
 
 tests/                       ← Integration test scripts
   test_canvas.py             ← Non-GUI canvas observer regression tests
+  test_canvas_tracker.py     ← Stable canvas ID tracking tests
+  test_tool_families.py      ← Manual/default sidebar family tests
+  test_verification.py       ← Action-level verification tests
   test_pipeline_rescan.py    ← request_rescan refresh regression test
   test_collect_icons.py      ← Perception pipeline test
   test_manual.py             ← No-LLM hardcoded sequences
@@ -151,7 +155,7 @@ python tests/demo_integration.py --mode both --dry-run
 python tests/test_manual.py --run single --dry-run
 
 # Reliability-layer unit tests (no Draw.io, no Ollama, no real pyautogui)
-python -m unittest tests.test_canvas tests.test_pipeline_rescan
+python -m unittest tests.test_canvas tests.test_canvas_tracker tests.test_tool_families tests.test_verification tests.test_pipeline_rescan
 ```
 
 ### T3 — Perception (screenshot + OpenCV, no GUI focus needed)
@@ -201,7 +205,7 @@ python main.py --task "Draw a rectangle labelled Cache" --dry-run
 python main.py --task "Draw a rectangle labelled Cache" --trace
 ```
 
-`--trace` writes one JSON file per step under `test_output/runs/<timestamp>/`, including screenshot paths, canvas annotation image paths, prompt text, graph summaries, model decision, dispatch result, verification result, and history.
+`--trace` writes one JSON file per step under `test_output/runs/<timestamp>/`, including screenshot paths, canvas annotation image paths, accepted/rejected canvas candidates, tracking diagnostics, tool-family defaults, prompt text, graph summaries, model decision, dispatch result, verification result, and history.
 
 ---
 
@@ -209,12 +213,12 @@ python main.py --task "Draw a rectangle labelled Cache" --trace
 
 | File | Owner | Content |
 |------|-------|---------|
-| `config.json` | Manual | Domain selection, paths, models, executor timing, `sidebar_region`, `canvas_region`, and perception params |
+| `config.json` | Manual | Domain selection, paths, models, executor timing, `sidebar_region`, `canvas_region`, perception params, and optional `tool_families` defaults |
 | `state/ui_graph.json` | Perception | Persistent sidebar tool positions and labels |
 
-Runtime canvas nodes are not written into `config.json`. During the main pipeline, `core/perception/canvas.py` rebuilds `Canvas_Nodes` from the current screenshot as approximate `Observed_Node_N` entries.
+Runtime canvas nodes are not written into `config.json` or `state/ui_graph.json`. During one main pipeline run, `core/perception/tracker.py` keeps `Observed_Node_N` IDs stable across screenshots by matching raw detections by center distance, size similarity, and bounding-box overlap.
 
-`explorer.canvas_region` is a configurable physical-pixel crop. The current default is tuned for one Draw.io window layout; if the window moves, recalibrate the config instead of editing code. Canvas perception supports light and dark Draw.io themes by switching stroke polarity from the screenshot crop brightness.
+`explorer.canvas_region` is a configurable physical-pixel crop. The current default is tuned for one Draw.io window layout; if the window moves, recalibrate the config instead of editing code. Canvas perception supports light and dark Draw.io themes by switching stroke polarity from the screenshot crop brightness. Trace overlays draw the crop boundary, accepted nodes, rejected candidates, and motion arrows for tracked nodes.
 
 ---
 

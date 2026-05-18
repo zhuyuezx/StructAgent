@@ -633,18 +633,25 @@ Draw.io-specific multi-step workflows. Composes primitives from `core/tools/prim
 `observe_canvas(screenshot_path)`:
 
 - Crops the current screenshot to `explorer.canvas_region`
-- Uses OpenCV contours to detect visible closed shapes on the canvas
+- Uses theme-aware OpenCV contours to detect visible closed shapes on the canvas
 - Returns approximate runtime nodes like `Observed_Node_1` with logical center/size, confidence, stroke density, rectangularity, and source metadata
-- `annotate_canvas()` writes visual debug images showing detected canvas boxes during traced runs
-- Provides graph summaries and ambiguous sidebar tool families for traces and prompts
+- `observe_canvas_detailed()` returns accepted/rejected candidates, crop metadata, and theme/polarity for traces
+- `annotate_canvas()` writes visual debug images showing crop bounds, accepted boxes, rejected boxes, and tracked motion arrows
+- Provides graph summaries and configured/default sidebar tool families for traces and prompts
 
 This is intentionally approximate. For v1, it is mainly used to answer "did a shape appear?" and to provide the planner with current visible canvas state.
+
+### `core/perception/tracker.py` — Runtime canvas tracking
+
+`CanvasTracker` keeps `Observed_Node_N` stable within one pipeline run. It matches raw detections by center distance, size similarity, and bounding-box overlap, then records matched/new/deleted tracks in trace diagnostics.
 
 ### `core/verification.py` — Post-action checks
 
 `verify_action(...)` compares before/after screenshots and observed graphs:
 
-- `place_shape` / `place_and_label` / `place_shape_then_edit_label`: node-count increase is a strong pass
+- `place_shape` / `place_and_label` / `place_shape_then_edit_label`: new tracked node or node-count increase is a strong pass
+- drag/move tools: same tracked node moving in the expected direction is a strong pass
+- `delete_node`: target tracked node disappearing or node-count decrease is a strong pass
 - `type_label` / `edit_label`: canvas image change is a weak pass because OCR is not implemented yet
 - `press_escape`, `press_enter`, and `click_empty_canvas`: non-blocking weak pass unless dispatch failed
 `text_placement` is currently recorded as `unknown`.
@@ -694,7 +701,11 @@ Tests that the LLM picks the right tools for progressively harder tasks:
 
 ### `tests/test_canvas.py` — Canvas observer regression test
 
-Uses synthetic screenshots to verify that an empty canvas returns zero nodes and a simple rectangle returns one observed node. Does not require Draw.io, Ollama, or pyautogui.
+Uses synthetic screenshots to verify that an empty canvas returns zero nodes, a simple rectangle returns one observed node, and detailed debug metadata/annotations are produced. Does not require Draw.io, Ollama, or pyautogui.
+
+### `tests/test_canvas_tracker.py`, `tests/test_tool_families.py`, `tests/test_verification.py`
+
+Regression tests for stable in-run node IDs, configured/default sidebar tool families, and action-level verification assertions.
 
 ### `tests/test_pipeline_rescan.py` — Rescan regression test
 
@@ -841,12 +852,12 @@ If Draw.io moves or you change screen resolution:
 2. Open `screenshots/manual_capture.png`
 3. Find the physical-pixel bounds of the draw.io canvas area, excluding the sidebar and top toolbar as much as practical
 4. Update `"canvas_region": [x1, y1, x2, y2]` in `config.json`
-5. Run `python -m unittest tests.test_canvas tests.test_pipeline_rescan`
+5. Run `python -m unittest tests.test_canvas tests.test_canvas_tracker tests.test_tool_families tests.test_verification tests.test_pipeline_rescan`
 6. Try a live traced run: `python main.py --task "Add a rectangle labelled Cache" --trace`
 
 ### Runtime `Canvas_Nodes`
 
-`canvas_nodes` in `config.json` is now a legacy/static fallback. During the main pipeline, `Canvas_Nodes` is rebuilt from the current screenshot and looks like:
+`canvas_nodes` in `config.json` is now a legacy/static fallback. During the main pipeline, `Canvas_Nodes` is rebuilt from the current screenshot and tracked in memory with stable IDs. It looks like:
 
 ```json
 [
@@ -858,7 +869,9 @@ If Draw.io moves or you change screen resolution:
     "w": 120,
     "h": 60,
     "confidence": 0.82,
-    "source": "opencv_canvas_contour"
+    "source": "opencv_canvas_contour",
+    "track_status": "matched",
+    "last_seen_step": 2
   }
 ]
 ```

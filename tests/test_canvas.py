@@ -7,7 +7,7 @@ import unittest
 import cv2
 import numpy as np
 
-from core.perception.canvas import annotate_canvas, observe_canvas
+from core.perception.canvas import annotate_canvas, observe_canvas, observe_canvas_detailed
 
 
 class CanvasPerceptionTest(unittest.TestCase):
@@ -19,6 +19,31 @@ class CanvasPerceptionTest(unittest.TestCase):
             nodes = observe_canvas(path, region=(0, 0, 500, 300))
 
         self.assertEqual(nodes, [])
+
+    def test_detailed_empty_canvas_has_debug_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "empty.png")
+            _write_grid_canvas(path)
+
+            detail = observe_canvas_detailed(path, region=(0, 0, 500, 300))
+
+        self.assertEqual(detail["nodes"], [])
+        self.assertEqual(detail["theme"], "light")
+        self.assertIn("accepted_candidates", detail)
+        self.assertIn("rejected_candidates", detail)
+
+    def test_rejected_candidate_includes_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "small_shape.png")
+            img = _write_grid_canvas(path)
+            cv2.rectangle(img, (30, 30), (60, 50), (40, 40, 40), 2)
+            cv2.imwrite(path, img)
+
+            detail = observe_canvas_detailed(path, region=(0, 0, 500, 300))
+
+        self.assertEqual(detail["nodes"], [])
+        self.assertTrue(detail["rejected_candidates"])
+        self.assertTrue(detail["rejected_candidates"][0]["reasons"])
 
     def test_rectangle_canvas_returns_one_node(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -69,6 +94,19 @@ class CanvasPerceptionTest(unittest.TestCase):
 
         self.assertEqual(len(nodes), 1)
 
+    def test_detailed_selected_rectangle_has_accepted_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "selected_detail.png")
+            img = _write_grid_canvas(path)
+            cv2.rectangle(img, (120, 90), (300, 170), (40, 40, 40), 2)
+            cv2.imwrite(path, img)
+
+            detail = observe_canvas_detailed(path, region=(0, 0, 500, 300))
+
+        self.assertEqual(len(detail["nodes"]), 1)
+        self.assertEqual(len(detail["accepted_candidates"]), 1)
+        self.assertEqual(detail["accepted_candidates"][0]["id"], "Raw_Node_1")
+
     def test_text_below_rectangle_does_not_create_extra_node(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "text_below.png")
@@ -91,7 +129,8 @@ class CanvasPerceptionTest(unittest.TestCase):
             cv2.imwrite(path, img)
             nodes = observe_canvas(path, region=(0, 0, 500, 300))
 
-            result = annotate_canvas(path, nodes, out)
+            detail = observe_canvas_detailed(path, region=(0, 0, 500, 300))
+            result = annotate_canvas(path, nodes, out, detection=detail)
 
             self.assertEqual(result, out)
             self.assertTrue(os.path.exists(out))

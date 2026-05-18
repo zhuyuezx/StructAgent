@@ -48,5 +48,30 @@
     "nms_distance": 20,
     "label_timeout": 30,
     "label_max_retries": 2
+  },
+  "tool_families": {
+    "Rectangle_Family": {
+      "default": "Rectangle_Tool",
+      "candidates": [
+        "Rectangle_Tool",
+        "Rectangle_Tool_1",
+        "Rectangle_Tool_2",
+        "Rectangle_Tool_3",
+        "Rectangle_Tool_4",
+        "Rectangle_Tool_5"
+      ]
+    },
+    "Ellipse_Family": {
+      "default": "Ellipse_Tool",
+      "candidates": [
+        "Ellipse_Tool"
+      ]
+    },
+    "Connector_Family": {
+      "default": "Connector_Tool",
+      "candidates": [
+        "Connector_Tool"
+      ]
+    }
   }
 }
