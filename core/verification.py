@@ -50,6 +50,19 @@ def verify_action(
         return _result(True, "selection_state_not_strictly_verified",
                        before_count, after_count, changed, confidence="weak")
 
+    if tool_name in {
+        "drag_node", "drag_node_near", "drag_node_to_zone",
+        "move_and_deselect", "move_node_to_zone_and_deselect",
+    }:
+        if changed:
+            return _result(True, "canvas_changed_after_drag",
+                           before_count, after_count, changed)
+        if before_count == after_count and after_count > 0:
+            return _result(True, "node_count_stable_after_drag_but_motion_not_detected",
+                           before_count, after_count, changed, confidence="weak")
+        return _result(False, "no_canvas_change_after_drag",
+                       before_count, after_count, changed)
+
     return _result(True, "no_specific_verifier_for_tool",
                    before_count, after_count, changed, confidence="weak")
 

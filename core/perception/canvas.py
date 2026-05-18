@@ -156,12 +156,23 @@ def _clamped_region(
 
 
 def _stroke_mask(crop: np.ndarray) -> np.ndarray:
-    """Keep darker strokes while suppressing light draw.io grid lines."""
+    """Keep shape strokes while suppressing draw.io grid lines.
+
+    Draw.io can run in light or dark mode. Light mode shapes are usually dark
+    strokes on a bright grid; dark mode shapes are usually bright strokes on a
+    dark grid. Pick the threshold polarity from the crop brightness instead of
+    assuming one theme.
+    """
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-    _, mask = cv2.threshold(blurred, 220, 255, cv2.THRESH_BINARY_INV)
     kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    if float(np.median(gray)) < 110:
+        _, mask = cv2.threshold(blurred, 120, 255, cv2.THRESH_BINARY)
+    else:
+        _, mask = cv2.threshold(blurred, 220, 255, cv2.THRESH_BINARY_INV)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
     return mask
 

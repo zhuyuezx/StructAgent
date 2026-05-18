@@ -54,6 +54,10 @@ L1 delete_node(node_ref)                          ← domains/drawio
 L1 move_and_deselect(node_ref, target_x, target_y) ← domains/drawio
   L0 drag_node(node_ref, target_x, target_y)
   L0 click_empty_canvas()
+
+L1 move_node_to_zone_and_deselect(node_ref, zone) ← domains/drawio
+  L0 drag_node_to_zone(node_ref, zone)
+  L0 click_empty_canvas()
 ```
 
 To visualize: `python tests/demo_integration.py --tree`
@@ -126,7 +130,7 @@ Tests are ordered by dependency. Start from T1 and work down — each level requ
 ### T1 — No dependencies (import + schema)
 
 ```bash
-# Verify tool registry assembles (14 L0 + 5 L1 = 19 tools)
+# Verify tool registry assembles (15 L0 + 6 L1 = 21 tools)
 python -c "from core.tools import TOOL_CATALOG, print_tree; print(len(TOOL_CATALOG), 'tools'); print_tree()"
 
 # Verify config + ui_graph.json load
@@ -210,7 +214,7 @@ python main.py --task "Draw a rectangle labelled Cache" --trace
 
 Runtime canvas nodes are not written into `config.json`. During the main pipeline, `core/perception/canvas.py` rebuilds `Canvas_Nodes` from the current screenshot as approximate `Observed_Node_N` entries.
 
-`explorer.canvas_region` is a configurable physical-pixel crop. The current default is tuned for one Draw.io window layout; if the window moves, recalibrate the config instead of editing code.
+`explorer.canvas_region` is a configurable physical-pixel crop. The current default is tuned for one Draw.io window layout; if the window moves, recalibrate the config instead of editing code. Canvas perception supports light and dark Draw.io themes by switching stroke polarity from the screenshot crop brightness.
 
 ---
 

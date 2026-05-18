@@ -132,11 +132,11 @@ tests/
 
 Tools are split across three files and self-register at import time:
 
-**`core/tools/primitives.py` — Leaf tools (Level 0)**, 14 atomic GUI operations:
-`place_shape`, `type_label`, `press_escape`, `press_enter`, `press_delete`, `select_all`, `click_empty_canvas`, `click_node`, `double_click_node`, `drag_node`, `drag_node_near`, `resize_node`, `hotkey`, `undo`
+**`core/tools/primitives.py` — Leaf tools (Level 0)**, 15 atomic GUI operations:
+`place_shape`, `type_label`, `press_escape`, `press_enter`, `press_delete`, `select_all`, `click_empty_canvas`, `click_node`, `double_click_node`, `drag_node`, `drag_node_near`, `drag_node_to_zone`, `resize_node`, `hotkey`, `undo`
 
 **`domains/drawio/tools.py` — Compound tools (Level 1)**, multi-step workflows:
-`place_and_label`, `place_shape_then_edit_label`, `edit_label`, `delete_node`, `move_and_deselect`
+`place_and_label`, `place_shape_then_edit_label`, `edit_label`, `delete_node`, `move_and_deselect`, `move_node_to_zone_and_deselect`
 
 **`core/tools/registry.py`** — `ToolNode` dataclass, `register()`, `dispatch()`, coordinate resolution helpers (`resolve_tool`, `resolve_node`).
 
@@ -171,7 +171,7 @@ Prompt includes: available tools (as markdown table), named sidebar tools, ambig
 
 ### core/verification.py: post-action checks
 
-`verify_action()` compares pre-action and post-action screenshots/observed graphs. For `place_shape`, `place_and_label`, and `place_shape_then_edit_label`, node-count increase is a strong pass; image change without count increase is a weak pass. For `type_label`, image change is a weak pass because OCR is not implemented yet. `text_placement` is currently recorded as `"unknown"`. Selection-only actions such as `press_escape` and `click_empty_canvas` are non-blocking in v1.
+`verify_action()` compares pre-action and post-action screenshots/observed graphs. For `place_shape`, `place_and_label`, and `place_shape_then_edit_label`, node-count increase is a strong pass; image change without count increase is a weak pass. For drag tools, canvas image change is a strong pass and stable node count is a weak pass. For `type_label`, image change is a weak pass because OCR is not implemented yet. `text_placement` is currently recorded as `"unknown"`. Selection-only actions such as `press_escape` and `click_empty_canvas` are non-blocking in v1.
 
 ### Trace diagnostics
 

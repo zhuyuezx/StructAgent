@@ -194,6 +194,12 @@ ssh -L 11434:localhost:11434 \
   yay025@dsmlp-pod
 ```
 
+```bash
+ssh -L 11434:localhost:11434 \
+  -o ProxyCommand="ssh yay025@dsmlp-login.ucsd.edu '/opt/launch-sh/bin/launch-sp26-cuda128.sh -W CSE252D_SP26_A00 -c 4 -m 16 -g 1 -l gpu-class=large -H'" \
+  yay025@dsmlp-pod
+```
+
 **What this does:**
 - `ssh ... yay025@dsmlp-pod` opens an SSH session to a pod, with `-L 11434:...` forwarding Mac:11434 → pod:11434.
 - `ProxyCommand` — instead of TCP-connecting directly to `dsmlp-pod`, run a command on `dsmlp-login` whose stdin/stdout is the SSH transport. That command (`launch-sp26-cuda128.sh -H`) launches a fresh pod with `sshd` inside.
@@ -595,7 +601,7 @@ Defines the `ToolNode` dataclass and the global `TOOL_CATALOG`. Key parts:
 
 ### `core/tools/primitives.py` — Leaf tools (L0)
 
-14 atomic GUI operations, each wrapping a single `pyautogui` call. All self-register at the bottom of the file. Public function aliases are exported for direct use in test scripts.
+15 atomic GUI operations, each wrapping a single `pyautogui` call. All self-register at the bottom of the file. Public function aliases are exported for direct use in test scripts.
 
 ### `domains/drawio/tools.py` — Compound tools (L1)
 
@@ -808,7 +814,7 @@ User: "Add a rectangle labelled Cache"
     "model": "qwen3-vl:4b",           // VLM for icon labeling
     "screen_scale": 2,                 // 2 for Retina, 1 for non-Retina
     "sidebar_region": [0, 480, 380, 1120], // [x1, y1, x2, y2] in PHYSICAL pixels
-    "canvas_region": [630, 260, 2350, 1720], // canvas crop in PHYSICAL pixels
+    "canvas_region": [630, 326, 2350, 1540], // canvas crop in PHYSICAL pixels
     "icon_size_range": [20, 70],       // min/max icon size in physical pixels
     "nms_distance": 20,                // deduplicate icons within this many logical px
     "label_timeout": 30,               // seconds before VLM request times out
@@ -857,7 +863,7 @@ If Draw.io moves or you change screen resolution:
 ]
 ```
 
-Text recognition and edge detection are not implemented in this phase, so labels may remain empty and `Canvas_Edges` may remain empty.
+Text recognition and edge detection are not implemented in this phase, so labels may remain empty and `Canvas_Edges` may remain empty. The contour mask is theme-aware: it looks for dark strokes on light canvases and bright strokes on dark canvases.
 
 ---
 
@@ -879,6 +885,7 @@ Text recognition and edge detection are not implemented in this phase, so labels
 | `double_click_node`  | `node_ref`                                           | Double-click to enter text edit on existing node |
 | `drag_node`          | `node_ref`, `target_x`, `target_y`                   | Drag node to absolute position                   |
 | `drag_node_near`     | `node_ref`, `reference_node`, `offset_x`, `offset_y` | Drag node relative to another                    |
+| `drag_node_to_zone`  | `node_ref`, `zone`                                   | Drag node to a named canvas zone                 |
 | `resize_node`        | `node_ref`, `new_width`, `new_height`                | Resize a node                                    |
 | `hotkey`             | `keys`                                               | Press a keyboard shortcut                        |
 | `undo`               | —                                                    | Cmd+Z                                            |
@@ -894,6 +901,7 @@ Text recognition and edge detection are not implemented in this phase, so labels
 | `edit_label`        | `node_ref`, `new_label`            | double_click_node → select_all → type_label → press_escape → click_empty_canvas |
 | `delete_node`       | `node_ref`                         | click_node → press_delete → click_empty_canvas                                  |
 | `move_and_deselect` | `node_ref`, `target_x`, `target_y` | drag_node → click_empty_canvas                                                  |
+| `move_node_to_zone_and_deselect` | `node_ref`, `zone` | drag_node_to_zone → click_empty_canvas                                          |
 
 
 ### Special signals (not tools, no params)

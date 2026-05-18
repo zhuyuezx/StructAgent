@@ -9,7 +9,7 @@ at import time.
 from __future__ import annotations
 
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import pyautogui
 
@@ -104,6 +104,15 @@ def _fn_drag_node_near(
     return _fn_drag_node(ui_graph, node_ref, ref["x"] + offset_x, ref["y"] + offset_y)
 
 
+def _fn_drag_node_to_zone(ui_graph: Dict[str, Any], node_ref: str, zone: str) -> dict:
+    target_x, target_y = _canvas_zone_point(zone)
+    print(f"  [L0] drag_node_to_zone('{node_ref}', zone='{zone}')")
+    result = _fn_drag_node(ui_graph, node_ref, target_x, target_y)
+    result["tool"] = "drag_node_to_zone"
+    result["zone"] = _normalize_zone(zone)
+    return result
+
+
 def _fn_resize_node(
     ui_graph: Dict[str, Any], node_ref: str, new_width: int, new_height: int,
 ) -> dict:
@@ -134,6 +143,40 @@ def _fn_undo() -> dict:
     print("  [L0] undo (Cmd+Z)")
     pyautogui.hotkey("command", "z")
     return {"status": "ok", "tool": "undo"}
+
+
+def _canvas_zone_point(zone: str) -> Tuple[int, int]:
+    region = config.canvas_region()
+    if region is None:
+        raise ValueError("explorer.canvas_region is required for drag_node_to_zone")
+
+    zone_name = _normalize_zone(zone)
+    zone_fractions = {
+        "center": (0.50, 0.50),
+        "left": (0.25, 0.50),
+        "right": (0.75, 0.50),
+        "top": (0.50, 0.25),
+        "bottom": (0.50, 0.75),
+        "upper_left": (0.25, 0.25),
+        "upper_right": (0.75, 0.25),
+        "lower_left": (0.25, 0.75),
+        "lower_right": (0.75, 0.75),
+    }
+    if zone_name not in zone_fractions:
+        valid = ", ".join(sorted(zone_fractions))
+        raise ValueError(f"Unknown canvas zone '{zone}'. Valid zones: {valid}")
+
+    x1, y1, x2, y2 = region
+    fx, fy = zone_fractions[zone_name]
+    scale = max(config.screen_scale(), 1)
+    return (
+        int((x1 + (x2 - x1) * fx) / scale),
+        int((y1 + (y2 - y1) * fy) / scale),
+    )
+
+
+def _normalize_zone(zone: str) -> str:
+    return str(zone).strip().lower().replace("-", "_").replace(" ", "_")
 
 
 # ===========================================================================
@@ -207,6 +250,15 @@ N_DRAG_NODE_NEAR = ToolNode(
     description="Move a node to a position relative to another node.",
 )
 
+N_DRAG_NODE_TO_ZONE = ToolNode(
+    name="drag_node_to_zone", fn=_fn_drag_node_to_zone,
+    params=["node_ref", "zone"], needs_ui_graph=True,
+    description=(
+        "Drag a node to a named canvas zone: center, left, right, top, "
+        "bottom, upper_left, upper_right, lower_left, lower_right."
+    ),
+)
+
 N_RESIZE_NODE = ToolNode(
     name="resize_node", fn=_fn_resize_node,
     params=["node_ref", "new_width", "new_height"], needs_ui_graph=True,
@@ -234,7 +286,7 @@ for _n in (
     N_PLACE_SHAPE, N_TYPE_LABEL, N_PRESS_ESCAPE, N_PRESS_ENTER,
     N_PRESS_DELETE, N_SELECT_ALL, N_CLICK_EMPTY, N_CLICK_NODE,
     N_DOUBLE_CLICK_NODE, N_DRAG_NODE, N_DRAG_NODE_NEAR,
-    N_RESIZE_NODE, N_HOTKEY, N_UNDO,
+    N_DRAG_NODE_TO_ZONE, N_RESIZE_NODE, N_HOTKEY, N_UNDO,
 ):
     register(_n)
 
@@ -254,6 +306,7 @@ click_node = _fn_click_node
 double_click_node = _fn_double_click_node
 drag_node = _fn_drag_node
 drag_node_near = _fn_drag_node_near
+drag_node_to_zone = _fn_drag_node_to_zone
 resize_node = _fn_resize_node
 hotkey = _fn_hotkey
 undo = _fn_undo

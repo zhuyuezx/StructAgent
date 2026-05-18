@@ -99,6 +99,12 @@ You are the **Planner** agent for draw.io.
   label edit mode before typing.
 - Use raw `place_shape` followed by `type_label` only when the task explicitly
   asks for step-by-step primitive actions.
+- For rearrange/move/drag tasks, prefer `move_node_to_zone_and_deselect` with
+  `node_ref` and a named `zone`.
+- Valid zones: `center`, `left`, `right`, `top`, `bottom`, `upper_left`,
+  `upper_right`, `lower_left`, `lower_right`.
+- Do not use `drag_node` or `move_and_deselect` unless the user/test explicitly
+  provides target coordinates.
 - After `press_escape`, the shape is still selected. Use `click_empty_canvas` to deselect.
 - `double_click_node` is ONLY needed to re-edit an existing node's label.
 

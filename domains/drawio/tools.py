@@ -24,10 +24,10 @@ from core.tools.registry import ToolNode, register
 from core.tools.primitives import (
     _fn_place_shape, _fn_type_label, _fn_press_escape, _fn_click_empty_canvas,
     _fn_double_click_node, _fn_select_all, _fn_click_node, _fn_press_delete,
-    _fn_drag_node, _fn_press_enter,
+    _fn_drag_node, _fn_drag_node_to_zone, _fn_press_enter,
     N_PLACE_SHAPE, N_TYPE_LABEL, N_PRESS_ESCAPE, N_CLICK_EMPTY,
     N_DOUBLE_CLICK_NODE, N_SELECT_ALL, N_CLICK_NODE, N_PRESS_DELETE,
-    N_DRAG_NODE, N_PRESS_ENTER,
+    N_DRAG_NODE, N_DRAG_NODE_TO_ZONE, N_PRESS_ENTER,
 )
 
 
@@ -130,6 +130,24 @@ def _fn_move_and_deselect(
             "steps": steps}
 
 
+def _fn_move_node_to_zone_and_deselect(
+    ui_graph: Dict[str, Any], node_ref: str, zone: str,
+) -> dict:
+    """Drag a node to a named canvas zone and deselect."""
+    steps = []
+    print(f"\n  [L{N_MOVE_NODE_TO_ZONE_AND_DESELECT.level}] "
+          f"move_node_to_zone_and_deselect('{node_ref}', '{zone}')")
+    steps.append(_fn_drag_node_to_zone(ui_graph, node_ref, zone))
+    time.sleep(_STEP_PAUSE)
+    steps.append(_fn_click_empty_canvas())
+    ok = all(s.get("status") == "ok" for s in steps)
+    return {
+        "status": "ok" if ok else "partial",
+        "tool": "move_node_to_zone_and_deselect",
+        "steps": steps,
+    }
+
+
 # ===========================================================================
 # Compound ToolNodes (level auto-derived from children)
 # ===========================================================================
@@ -176,6 +194,14 @@ N_MOVE_AND_DESELECT = ToolNode(
     children=[N_DRAG_NODE, N_CLICK_EMPTY],
 )
 
+N_MOVE_NODE_TO_ZONE_AND_DESELECT = ToolNode(
+    name="move_node_to_zone_and_deselect",
+    fn=_fn_move_node_to_zone_and_deselect,
+    params=["node_ref", "zone"], needs_ui_graph=True,
+    description="Drag a node to a named canvas zone and deselect.",
+    children=[N_DRAG_NODE_TO_ZONE, N_CLICK_EMPTY],
+)
+
 
 # ===========================================================================
 # Self-register compound tools with the framework registry
@@ -184,6 +210,7 @@ N_MOVE_AND_DESELECT = ToolNode(
 for _n in (
     N_PLACE_AND_LABEL, N_PLACE_SHAPE_THEN_EDIT_LABEL,
     N_EDIT_LABEL, N_DELETE_NODE, N_MOVE_AND_DESELECT,
+    N_MOVE_NODE_TO_ZONE_AND_DESELECT,
 ):
     register(_n)
 
@@ -197,3 +224,4 @@ place_shape_then_edit_label = _fn_place_shape_then_edit_label
 edit_label = _fn_edit_label
 delete_node = _fn_delete_node
 move_and_deselect = _fn_move_and_deselect
+move_node_to_zone_and_deselect = _fn_move_node_to_zone_and_deselect

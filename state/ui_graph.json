@@ -24,7 +24,7 @@
       "w": 32,
       "h": 17
     },
-    "Angle_Tool": {
+    "Corner_Tool": {
       "x": 150,
       "y": 453,
       "w": 31,
@@ -72,7 +72,7 @@
       "w": 31,
       "h": 30
     },
-    "Banner_Tool": {
+    "Rectangle_Tool_5": {
       "x": 112,
       "y": 531,
       "w": 32,
