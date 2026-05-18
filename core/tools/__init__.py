@@ -34,7 +34,10 @@ from core.tools.primitives import (
 _domain_module = importlib.import_module(f"domains.{_config.domain()}.tools")
 
 # Re-export domain compound aliases if the plugin defines them
-for _alias in ("place_and_label", "edit_label", "delete_node", "move_and_deselect"):
+for _alias in (
+    "place_and_label", "place_shape_then_edit_label",
+    "edit_label", "delete_node", "move_and_deselect",
+):
     if hasattr(_domain_module, _alias):
         globals()[_alias] = getattr(_domain_module, _alias)
 
@@ -45,5 +48,6 @@ __all__ = [
     "place_shape", "type_label", "press_escape", "press_enter", "press_delete",
     "select_all_text", "click_empty_canvas", "click_node", "double_click_node",
     "drag_node", "drag_node_near", "resize_node", "hotkey", "undo",
-    "place_and_label", "edit_label", "delete_node", "move_and_deselect",
+    "place_and_label", "place_shape_then_edit_label",
+    "edit_label", "delete_node", "move_and_deselect",
 ]

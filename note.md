@@ -381,7 +381,7 @@ Tools are organized in a two-level tree across multiple files:
 - **L0 (leaf)** — one atomic GUI action (click a point, press a key, type text) — defined in `core/tools/primitives.py`
 - **L1 (compound)** — a sequence of L0 actions packaged as a single call — defined in `domains/drawio/tools.py`
 
-For example, `place_and_label` (L1) internally calls `place_shape` → `type_label` → `press_escape` → `click_empty_canvas`. The LLM can call either level.
+For example, `place_shape_then_edit_label` (L1) internally calls `place_shape` → `press_escape` → `press_enter` → `select_all` → `type_label` → `press_escape` → `click_empty_canvas`. The LLM should prefer it for labelled-shape tasks because it explicitly enters label edit mode before typing.
 
 Level is auto-computed: a compound node's level = `max(child.level) + 1`. You never set it manually.
 
@@ -400,7 +400,7 @@ Draw.io's behavior when you click a sidebar shape:
 3. Press Escape → exits text editing, shape stays selected
 4. Click empty canvas → deselects the shape
 
-This exact sequence is what `place_and_label` automates.
+`place_shape_then_edit_label` is the preferred workflow for new labelled shapes because it explicitly enters label edit mode. `place_and_label` is still available as the older direct workflow.
 
 ---
 
@@ -628,7 +628,8 @@ Draw.io-specific multi-step workflows. Composes primitives from `core/tools/prim
 
 - Crops the current screenshot to `explorer.canvas_region`
 - Uses OpenCV contours to detect visible closed shapes on the canvas
-- Returns approximate runtime nodes like `Observed_Node_1` with logical center/size, confidence, and source metadata
+- Returns approximate runtime nodes like `Observed_Node_1` with logical center/size, confidence, stroke density, rectangularity, and source metadata
+- `annotate_canvas()` writes visual debug images showing detected canvas boxes during traced runs
 - Provides graph summaries and ambiguous sidebar tool families for traces and prompts
 
 This is intentionally approximate. For v1, it is mainly used to answer "did a shape appear?" and to provide the planner with current visible canvas state.
@@ -637,9 +638,10 @@ This is intentionally approximate. For v1, it is mainly used to answer "did a sh
 
 `verify_action(...)` compares before/after screenshots and observed graphs:
 
-- `place_shape` / `place_and_label`: node-count increase is a strong pass
+- `place_shape` / `place_and_label` / `place_shape_then_edit_label`: node-count increase is a strong pass
 - `type_label` / `edit_label`: canvas image change is a weak pass because OCR is not implemented yet
 - `press_escape`, `press_enter`, and `click_empty_canvas`: non-blocking weak pass unless dispatch failed
+`text_placement` is currently recorded as `unknown`.
 
 ### `core/state/ui_graph.py` — State persistence
 
@@ -729,16 +731,19 @@ User: "Add a rectangle labelled Cache"
     │     │    - Ambiguous tool families (e.g. Rectangle_Family)
     │     │    - Screenshot bytes
     │     │  Sends to Ollama (qwen3.5:35b)
-    │     │  Gets back: {"tool": "place_and_label",
+    │     │  Gets back: {"tool": "place_shape_then_edit_label",
     │     │              "params": {"tool_name": "Rectangle_Tool", "label": "Cache"}}
     │           │
     │           ▼
-    │   core/tools → dispatch("place_and_label", params, ui_graph)
+    │   core/tools → dispatch("place_shape_then_edit_label", params, ui_graph)
     │     │  Looks up ToolNode in TOOL_CATALOG
-    │     │  Calls domains/drawio/tools._fn_place_and_label(ui_graph, "Rectangle_Tool", "Cache")
+    │     │  Calls domains/drawio/tools._fn_place_shape_then_edit_label(ui_graph, "Rectangle_Tool", "Cache")
     │     │    ├── place_shape → resolve "Rectangle_Tool" → (33, 299) → pyautogui.click(33, 299)
-    │     │    ├── type_label  → pyautogui.typewrite("Cache")
-    │     │    ├── press_escape → pyautogui.hotkey("Escape")
+    │     │    ├── press_escape → normalize selection/edit state
+    │     │    ├── press_enter → enter label edit mode
+    │     │    ├── select_all
+    │     │    ├── type_label → pyautogui.typewrite("Cache")
+    │     │    ├── press_escape → exit text editing
     │     │    └── click_empty_canvas → pyautogui.click(600, 400)
     │           │
     │           ▼
@@ -803,7 +808,7 @@ User: "Add a rectangle labelled Cache"
     "model": "qwen3-vl:4b",           // VLM for icon labeling
     "screen_scale": 2,                 // 2 for Retina, 1 for non-Retina
     "sidebar_region": [0, 480, 380, 1120], // [x1, y1, x2, y2] in PHYSICAL pixels
-    "canvas_region": [380, 120, 3000, 1800], // canvas crop in PHYSICAL pixels
+    "canvas_region": [630, 260, 2350, 1720], // canvas crop in PHYSICAL pixels
     "icon_size_range": [20, 70],       // min/max icon size in physical pixels
     "nms_distance": 20,                // deduplicate icons within this many logical px
     "label_timeout": 30,               // seconds before VLM request times out
@@ -885,6 +890,7 @@ Text recognition and edge detection are not implemented in this phase, so labels
 | Tool                | Params                             | Steps inside                                                                    |
 | ------------------- | ---------------------------------- | ------------------------------------------------------------------------------- |
 | `place_and_label`   | `tool_name`, `label`               | place_shape → type_label → press_escape → click_empty_canvas                    |
+| `place_shape_then_edit_label` | `tool_name`, `label` | place_shape → press_escape → press_enter → select_all → type_label → press_escape → click_empty_canvas |
 | `edit_label`        | `node_ref`, `new_label`            | double_click_node → select_all → type_label → press_escape → click_empty_canvas |
 | `delete_node`       | `node_ref`                         | click_node → press_delete → click_empty_canvas                                  |
 | `move_and_deselect` | `node_ref`, `target_x`, `target_y` | drag_node → click_empty_canvas                                                  |

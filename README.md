@@ -30,6 +30,15 @@ L1 place_and_label(tool_name, label)              ← domains/drawio
   L0 press_escape()                               ← core
   L0 click_empty_canvas()                         ← core
 
+L1 place_shape_then_edit_label(tool_name, label)  ← domains/drawio
+  L0 place_shape(tool_name)
+  L0 press_escape()
+  L0 press_enter()
+  L0 select_all()
+  L0 type_label(text)
+  L0 press_escape()
+  L0 click_empty_canvas()
+
 L1 edit_label(node_ref, new_label)                ← domains/drawio
   L0 double_click_node(node_ref)
   L0 select_all()
@@ -117,7 +126,7 @@ Tests are ordered by dependency. Start from T1 and work down — each level requ
 ### T1 — No dependencies (import + schema)
 
 ```bash
-# Verify tool registry assembles (14 L0 + 4 L1 = 18 tools)
+# Verify tool registry assembles (14 L0 + 5 L1 = 19 tools)
 python -c "from core.tools import TOOL_CATALOG, print_tree; print(len(TOOL_CATALOG), 'tools'); print_tree()"
 
 # Verify config + ui_graph.json load
@@ -188,7 +197,7 @@ python main.py --task "Draw a rectangle labelled Cache" --dry-run
 python main.py --task "Draw a rectangle labelled Cache" --trace
 ```
 
-`--trace` writes one JSON file per step under `test_output/runs/<timestamp>/`, including screenshot paths, prompt text, graph summaries, model decision, dispatch result, verification result, and history.
+`--trace` writes one JSON file per step under `test_output/runs/<timestamp>/`, including screenshot paths, canvas annotation image paths, prompt text, graph summaries, model decision, dispatch result, verification result, and history.
 
 ---
 
@@ -200,6 +209,8 @@ python main.py --task "Draw a rectangle labelled Cache" --trace
 | `state/ui_graph.json` | Perception | Persistent sidebar tool positions and labels |
 
 Runtime canvas nodes are not written into `config.json`. During the main pipeline, `core/perception/canvas.py` rebuilds `Canvas_Nodes` from the current screenshot as approximate `Observed_Node_N` entries.
+
+`explorer.canvas_region` is a configurable physical-pixel crop. The current default is tuned for one Draw.io window layout; if the window moves, recalibrate the config instead of editing code.
 
 ---
 

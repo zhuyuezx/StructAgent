@@ -15,7 +15,7 @@ from typing import Any, Dict, List
 from core import config
 from core.capture import screenshot
 from core.agents.executor import build_prompt, infer
-from core.perception.canvas import observe_canvas, summarize_graph
+from core.perception.canvas import annotate_canvas, observe_canvas, summarize_graph
 from core.tools import dispatch
 from core.verification import verify_action
 
@@ -48,6 +48,9 @@ def run(
         img_path = screenshot(f"step_{step:02d}.png")
         graph = _runtime_graph(img_path, base_graph)
         graph_before = graph
+        canvas_annotation = _write_canvas_annotation(
+            trace_dir, step, img_path, graph_before, suffix="canvas",
+        )
         decision = infer(task, graph, img_path, history or None)
         tool_name = decision.get("tool", "")
         params = decision.get("params", {})
@@ -61,6 +64,7 @@ def run(
                 "task": task,
                 "step": step,
                 "screenshot": img_path,
+                "canvas_annotation": canvas_annotation,
                 "ui_graph_before": summarize_graph(graph_before),
                 "prompt": build_prompt(graph_before),
                 "result": {"status": "rescanned"},
@@ -76,6 +80,7 @@ def run(
                 "task": task,
                 "step": step,
                 "screenshot": img_path,
+                "canvas_annotation": canvas_annotation,
                 "ui_graph_before": summarize_graph(graph_before),
                 "prompt": build_prompt(graph_before),
                 "dispatch_result": None,
@@ -89,6 +94,7 @@ def run(
             result = {"status": "dry_run"}
             after_img = img_path
             graph_after = graph_before
+            post_canvas_annotation = canvas_annotation
             verification = {
                 "passed": True,
                 "confidence": "skipped",
@@ -102,6 +108,9 @@ def run(
             time.sleep(cooldown)
             after_img = screenshot(f"step_{step:02d}_after.png")
             graph_after = _runtime_graph(after_img, base_graph)
+            post_canvas_annotation = _write_canvas_annotation(
+                trace_dir, step, after_img, graph_after, suffix="after_canvas",
+            )
             verification = verify_action(
                 tool_name, params, graph_before, graph_after,
                 img_path, after_img, result,
@@ -116,6 +125,8 @@ def run(
             "step": step,
             "screenshot": img_path,
             "post_action_screenshot": after_img,
+            "canvas_annotation": canvas_annotation,
+            "post_action_canvas_annotation": post_canvas_annotation,
             "ui_graph_before": summarize_graph(graph_before),
             "ui_graph_after": summarize_graph(graph_after),
             "prompt": build_prompt(graph_before),
@@ -179,3 +190,17 @@ def _write_trace(
     }
     with open(path, "w") as f:
         json.dump(payload, f, indent=2)
+
+
+def _write_canvas_annotation(
+    trace_dir: str | None,
+    step: int,
+    screenshot_path: str,
+    graph: Dict[str, Any],
+    *,
+    suffix: str,
+) -> str | None:
+    if not trace_dir:
+        return None
+    path = os.path.join(trace_dir, f"step_{step:02d}_{suffix}.png")
+    return annotate_canvas(screenshot_path, graph.get("Canvas_Nodes", []), path)

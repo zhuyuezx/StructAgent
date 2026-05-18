@@ -136,7 +136,7 @@ Tools are split across three files and self-register at import time:
 `place_shape`, `type_label`, `press_escape`, `press_enter`, `press_delete`, `select_all`, `click_empty_canvas`, `click_node`, `double_click_node`, `drag_node`, `drag_node_near`, `resize_node`, `hotkey`, `undo`
 
 **`domains/drawio/tools.py` — Compound tools (Level 1)**, multi-step workflows:
-`place_and_label`, `edit_label`, `delete_node`, `move_and_deselect`
+`place_and_label`, `place_shape_then_edit_label`, `edit_label`, `delete_node`, `move_and_deselect`
 
 **`core/tools/registry.py`** — `ToolNode` dataclass, `register()`, `dispatch()`, coordinate resolution helpers (`resolve_tool`, `resolve_node`).
 
@@ -158,8 +158,9 @@ Tools are split across three files and self-register at import time:
 
 **`canvas.py`** — `observe_canvas(screenshot_path)`:
 - Crops screenshot to `explorer.canvas_region`
-- Uses OpenCV contours to detect visible closed shapes on the canvas
-- Returns approximate runtime nodes like `Observed_Node_1` with logical center/size, confidence, and source metadata
+- Uses dark-stroke OpenCV contours so light grid lines are suppressed
+- Returns approximate runtime nodes like `Observed_Node_1` with logical center/size, confidence, stroke density, rectangularity, and source metadata
+- `annotate_canvas()` writes visual debug images showing detected boxes
 - Also provides graph summaries and ambiguous sidebar tool family grouping for traces/prompts
 
 **`core/state/ui_graph.py`** — `save_ui_state(icons)` formats labeled icons as `{name}_Tool` entries and writes to `state/ui_graph.json`.
@@ -170,8 +171,8 @@ Prompt includes: available tools (as markdown table), named sidebar tools, ambig
 
 ### core/verification.py: post-action checks
 
-`verify_action()` compares pre-action and post-action screenshots/observed graphs. For `place_shape` and `place_and_label`, node-count increase is a strong pass; image change without count increase is a weak pass. For `type_label`, image change is a weak pass because OCR is not implemented yet. Selection-only actions such as `press_escape` and `click_empty_canvas` are non-blocking in v1.
+`verify_action()` compares pre-action and post-action screenshots/observed graphs. For `place_shape`, `place_and_label`, and `place_shape_then_edit_label`, node-count increase is a strong pass; image change without count increase is a weak pass. For `type_label`, image change is a weak pass because OCR is not implemented yet. `text_placement` is currently recorded as `"unknown"`. Selection-only actions such as `press_escape` and `click_empty_canvas` are non-blocking in v1.
 
 ### Trace diagnostics
 
-`python main.py --task "Add a rectangle labelled Cache" --trace` writes one JSON file per step under `test_output/runs/<timestamp>/`. Each step includes screenshot paths, prompt text, UI graph summaries, decision, dispatch result, verification result, and history.
+`python main.py --task "Add a rectangle labelled Cache" --trace` writes one JSON file per step under `test_output/runs/<timestamp>/`. Each step includes screenshot paths, canvas annotation image paths, prompt text, UI graph summaries, decision, dispatch result, verification result, and history.

@@ -29,7 +29,7 @@ def verify_action(
     if dispatch_result.get("status") == "error":
         return _result(False, "dispatch_error", before_count, after_count, changed)
 
-    if tool_name in {"place_shape", "place_and_label"}:
+    if tool_name in {"place_shape", "place_and_label", "place_shape_then_edit_label"}:
         if after_count > before_count:
             return _result(True, "observed_canvas_node_count_increased",
                            before_count, after_count, changed)
@@ -70,6 +70,7 @@ def _result(
         "before_node_count": before_count,
         "after_node_count": after_count,
         "canvas_changed": changed,
+        "text_placement": "unknown",
     }
 
 

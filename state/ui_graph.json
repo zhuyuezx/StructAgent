@@ -1,142 +1,94 @@
 {
   "ui_elements": {
     "unknown_Tool": {
+      "x": 184,
+      "y": 267,
+      "w": 11,
+      "h": 10
+    },
+    "Text_Tool": {
+      "x": 106,
+      "y": 268,
+      "w": 26,
+      "h": 12
+    },
+    "unknown_Tool_1": {
       "x": 35,
-      "y": 283,
+      "y": 345,
       "w": 10,
       "h": 10
     },
     "Rectangle_Tool": {
       "x": 36,
-      "y": 391,
+      "y": 453,
       "w": 32,
       "h": 17
     },
-    "Corner_Tool": {
+    "Angle_Tool": {
       "x": 150,
-      "y": 391,
+      "y": 453,
       "w": 31,
       "h": 17
     },
     "Rectangle_Tool_1": {
       "x": 36,
-      "y": 430,
+      "y": 492,
       "w": 31,
       "h": 17
     },
     "Rectangle_Tool_2": {
       "x": 74,
-      "y": 430,
+      "y": 492,
       "w": 31,
       "h": 17
     },
     "Rectangle_Tool_3": {
       "x": 112,
-      "y": 430,
+      "y": 492,
       "w": 31,
       "h": 17
     },
     "Rectangle_Tool_4": {
       "x": 150,
-      "y": 430,
+      "y": 492,
       "w": 31,
       "h": 17
     },
-    "Rectangle_Tool_5": {
+    "Rounded_Rectangle_Tool": {
       "x": 181,
-      "y": 430,
+      "y": 492,
       "w": 17,
       "h": 17
     },
     "Star_Tool": {
       "x": 36,
-      "y": 469,
+      "y": 531,
       "w": 32,
       "h": 29
     },
     "Star_Tool_1": {
       "x": 74,
-      "y": 469,
+      "y": 531,
       "w": 31,
       "h": 30
     },
-    "Ribbon_Tool": {
+    "Banner_Tool": {
       "x": 112,
-      "y": 469,
+      "y": 531,
       "w": 32,
       "h": 17
     },
     "Cloud_Tool": {
       "x": 150,
-      "y": 469,
+      "y": 531,
       "w": 31,
       "h": 22
     },
-    "Rounded_Rectangle_Tool": {
+    "Rounded_Rectangle_Tool_1": {
       "x": 181,
-      "y": 469,
+      "y": 531,
       "w": 17,
       "h": 24
-    },
-    "Rectangle_Tool_6": {
-      "x": 36,
-      "y": 508,
-      "w": 29,
-      "h": 30
-    },
-    "Target_Tool": {
-      "x": 74,
-      "y": 508,
-      "w": 30,
-      "h": 30
-    },
-    "Drop_Tool": {
-      "x": 112,
-      "y": 508,
-      "w": 22,
-      "h": 30
-    },
-    "Lightning_Tool": {
-      "x": 150,
-      "y": 508,
-      "w": 20,
-      "h": 30
-    },
-    "Semicircle_Tool": {
-      "x": 181,
-      "y": 508,
-      "w": 17,
-      "h": 17
-    },
-    "Crescent_Tool": {
-      "x": 75,
-      "y": 546,
-      "w": 21,
-      "h": 28
-    },
-    "Circle_Tool": {
-      "x": 112,
-      "y": 546,
-      "w": 30,
-      "h": 27
-    },
-    "Octagon_Tool": {
-      "x": 150,
-      "y": 546,
-      "w": 30,
-      "h": 27
-    },
-    "Speech_Bubble_Tool": {
-      "x": 36,
-      "y": 547,
-      "w": 32,
-      "h": 22
-    },
-    "Triangle_Tool": {
-      "x": 181,
-      "y": 547,
-      "w": 17,
-      "h": 23
     }
   }
 }

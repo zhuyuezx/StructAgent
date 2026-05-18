@@ -24,10 +24,10 @@ from core.tools.registry import ToolNode, register
 from core.tools.primitives import (
     _fn_place_shape, _fn_type_label, _fn_press_escape, _fn_click_empty_canvas,
     _fn_double_click_node, _fn_select_all, _fn_click_node, _fn_press_delete,
-    _fn_drag_node,
+    _fn_drag_node, _fn_press_enter,
     N_PLACE_SHAPE, N_TYPE_LABEL, N_PRESS_ESCAPE, N_CLICK_EMPTY,
     N_DOUBLE_CLICK_NODE, N_SELECT_ALL, N_CLICK_NODE, N_PRESS_DELETE,
-    N_DRAG_NODE,
+    N_DRAG_NODE, N_PRESS_ENTER,
 )
 
 
@@ -55,6 +55,31 @@ def _fn_place_and_label(
     ok = all(s.get("status") == "ok" for s in steps)
     return {"status": "ok" if ok else "partial", "tool": "place_and_label",
             "steps": steps}
+
+
+def _fn_place_shape_then_edit_label(
+    ui_graph: Dict[str, Any], tool_name: str, label: str,
+) -> dict:
+    """Place a shape, enter edit mode explicitly, label it, then deselect."""
+    steps = []
+    print(f"\n  [L{N_PLACE_SHAPE_THEN_EDIT_LABEL.level}] "
+          f"place_shape_then_edit_label('{tool_name}', '{label}')")
+    steps.append(_fn_place_shape(ui_graph, tool_name))
+    time.sleep(_STEP_PAUSE)
+    steps.append(_fn_press_escape())
+    time.sleep(_STEP_PAUSE)
+    steps.append(_fn_press_enter())
+    time.sleep(_STEP_PAUSE)
+    steps.append(_fn_select_all())
+    time.sleep(_STEP_PAUSE)
+    steps.append(_fn_type_label(label))
+    time.sleep(_STEP_PAUSE)
+    steps.append(_fn_press_escape())
+    time.sleep(_STEP_PAUSE)
+    steps.append(_fn_click_empty_canvas())
+    ok = all(s.get("status") == "ok" for s in steps)
+    return {"status": "ok" if ok else "partial",
+            "tool": "place_shape_then_edit_label", "steps": steps}
 
 
 def _fn_edit_label(
@@ -116,6 +141,19 @@ N_PLACE_AND_LABEL = ToolNode(
     children=[N_PLACE_SHAPE, N_TYPE_LABEL, N_PRESS_ESCAPE, N_CLICK_EMPTY],
 )
 
+N_PLACE_SHAPE_THEN_EDIT_LABEL = ToolNode(
+    name="place_shape_then_edit_label", fn=_fn_place_shape_then_edit_label,
+    params=["tool_name", "label"], needs_ui_graph=True,
+    description=(
+        "Place a shape, explicitly enter label edit mode, type the label, "
+        "then deselect."
+    ),
+    children=[
+        N_PLACE_SHAPE, N_PRESS_ESCAPE, N_PRESS_ENTER, N_SELECT_ALL,
+        N_TYPE_LABEL, N_PRESS_ESCAPE, N_CLICK_EMPTY,
+    ],
+)
+
 N_EDIT_LABEL = ToolNode(
     name="edit_label", fn=_fn_edit_label,
     params=["node_ref", "new_label"], needs_ui_graph=True,
@@ -143,7 +181,10 @@ N_MOVE_AND_DESELECT = ToolNode(
 # Self-register compound tools with the framework registry
 # ===========================================================================
 
-for _n in (N_PLACE_AND_LABEL, N_EDIT_LABEL, N_DELETE_NODE, N_MOVE_AND_DESELECT):
+for _n in (
+    N_PLACE_AND_LABEL, N_PLACE_SHAPE_THEN_EDIT_LABEL,
+    N_EDIT_LABEL, N_DELETE_NODE, N_MOVE_AND_DESELECT,
+):
     register(_n)
 
 
@@ -152,6 +193,7 @@ for _n in (N_PLACE_AND_LABEL, N_EDIT_LABEL, N_DELETE_NODE, N_MOVE_AND_DESELECT):
 # ===========================================================================
 
 place_and_label = _fn_place_and_label
+place_shape_then_edit_label = _fn_place_shape_then_edit_label
 edit_label = _fn_edit_label
 delete_node = _fn_delete_node
 move_and_deselect = _fn_move_and_deselect
