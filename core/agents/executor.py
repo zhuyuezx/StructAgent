@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 import ollama
 
 from core import config
+from core.state import scene_graph as _sg
 from core.tools import TOOL_CATALOG
 
 
@@ -148,6 +149,9 @@ You are the **Planner** agent for draw.io.
 ## DETECTED ELEMENTS
 {element_summary}
 
+## SCENE GRAPH (canvas objects + edges, deterministic — updated by framework)
+{scene_graph_summary}
+
 {active_selection}
 
 ## OUTPUT FORMAT
@@ -162,9 +166,11 @@ Respond with a single JSON object — no markdown, no commentary:
 
 def build_prompt(ui_graph: Dict[str, Any]) -> str:
     """Build the system prompt for the LLM."""
+    sg_data = ui_graph.get("scene_graph") or _sg.load()
     return _SYSTEM_TEMPLATE.format(
         tool_table=_tool_table(),
         element_summary=_element_summary(ui_graph),
+        scene_graph_summary=_sg.summary_for_prompt(sg_data),
         active_selection=_active_selection_summary(ui_graph),
     )
 

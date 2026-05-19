@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "next_object_id": 2,
+  "next_edge_id": 1,
+  "objects": [
+    {
+      "id": "obj_001",
+      "type": "Rectangle",
+      "label": "Source",
+      "bbox": [
+        691,
+        504,
+        120,
+        60
+      ],
+      "anchors": {
+        "n": [
+          751,
+          504
+        ],
+        "s": [
+          751,
+          564
+        ],
+        "e": [
+          811,
+          534
+        ],
+        "w": [
+          691,
+          534
+        ]
+      },
+      "selected": true,
+      "created_op": 1,
+      "last_updated_op": 3
+    }
+  ],
+  "edges": [],
+  "metadata": {
+    "op_count": 3,
+    "last_op": "press_escape"
+  }
+}

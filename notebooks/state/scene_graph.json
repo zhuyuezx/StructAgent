@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "next_object_id": 3,
+  "next_edge_id": 2,
+  "objects": [
+    {
+      "id": "obj_001",
+      "type": "Rectangle",
+      "label": "Source",
+      "bbox": [
+        704,
+        396,
+        84,
+        42
+      ],
+      "anchors": {
+        "n": [
+          746,
+          396
+        ],
+        "s": [
+          746,
+          438
+        ],
+        "e": [
+          788,
+          417
+        ],
+        "w": [
+          704,
+          417
+        ]
+      },
+      "selected": false,
+      "created_op": 1,
+      "last_updated_op": 4
+    },
+    {
+      "id": "obj_002",
+      "type": "Rectangle",
+      "label": "Target",
+      "bbox": [
+        708,
+        515,
+        84,
+        42
+      ],
+      "anchors": {
+        "n": [
+          750,
+          515
+        ],
+        "s": [
+          750,
+          557
+        ],
+        "e": [
+          792,
+          536
+        ],
+        "w": [
+          708,
+          536
+        ]
+      },
+      "selected": true,
+      "created_op": 5,
+      "last_updated_op": 7
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_001",
+      "source": "obj_002",
+      "target": "obj_001",
+      "source_anchor": "n",
+      "target_anchor": "s",
+      "label": ""
+    }
+  ],
+  "metadata": {
+    "op_count": 8,
+    "last_op": "connect_shapes"
+  }
+}
