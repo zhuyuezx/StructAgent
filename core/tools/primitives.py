@@ -24,16 +24,34 @@ from core.tools.registry import (
 # ===========================================================================
 
 def _fn_place_shape(ui_graph: Dict[str, Any], tool_name: str) -> dict:
+    """
+    Place a sidebar shape onto the canvas.
+
+    drawio auto-places the shape at a default canvas location on a single
+    click of the sidebar icon. The click selects the shape but does NOT
+    enter text-edit mode, so we follow up with Enter — drawio's "edit
+    label" shortcut on a selected shape — to leave it ready to receive
+    a label. (F2 would also work in drawio, but on macOS the function
+    keys default to hardware controls and may not reach the app.)
+    """
     x, y = resolve_tool(ui_graph, tool_name)
-    print(f"  [L0] place_shape('{tool_name}') → click ({x}, {y})")
+    print(f"  [L0] place_shape('{tool_name}') → click ({x}, {y}) + Enter")
     pyautogui.click(x, y)
+    time.sleep(0.3)
+    pyautogui.press("enter")
     return {"status": "ok", "tool": "place_shape", "tool_name": tool_name,
             "x": x, "y": y}
 
 
 def _fn_type_label(text: str) -> dict:
+    """
+    Type *text* into the currently focused element.
+
+    Uses ``pyautogui.write`` (NOT ``typewrite``) so capital letters and
+    punctuation are typed correctly via Shift modifiers.
+    """
     print(f"  [L0] type_label('{text}')")
-    pyautogui.typewrite(text, interval=config.type_interval())
+    pyautogui.write(text, interval=config.type_interval())
     return {"status": "ok", "tool": "type_label", "text": text}
 
 
