@@ -61,6 +61,64 @@ def _element_summary(ui_graph: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def _active_selection_summary(ui_graph: Dict[str, Any]) -> str:
+    """
+    Describe the currently-selected shape and the semantic operations
+    available on it. Coordinate-free — the model picks operations by name
+    and direction, never by handle position.
+    """
+    h = ui_graph.get("selected_handles")
+    if not h:
+        return (
+            "### Active Selection\n"
+            "_No shape currently selected._ Use `click_node` to select a "
+            "canvas node, or `scan_handles` to refresh after a placement."
+        )
+
+    bbox = h.get("shape_bbox") or [None] * 4
+    resize_dirs = sorted(_invert_resize_slots(h.get("resize", {})))
+    extend_dirs = sorted(h.get("extend", {}).keys())
+    can_rotate = bool(h.get("rotate"))
+
+    size_line = (
+        f"  - size: {bbox[2]}×{bbox[3]} logical px"
+        if bbox[2] is not None else "  - size: unknown"
+    )
+    lines = [
+        "### Active Selection",
+        "A shape is selected. You can manipulate it with these semantic",
+        "operations — pass only the direction/amount, the framework handles",
+        "the click/drag coordinates:",
+        "",
+        size_line,
+        f"  - `resize_shape(direction, amount)` — directions available: "
+        f"{', '.join(resize_dirs) if resize_dirs else '(none detected)'}",
+        f"  - `extend_shape(direction)` — directions available: "
+        f"{', '.join(extend_dirs) if extend_dirs else '(none detected — try scan_handles)'}",
+    ]
+    if can_rotate:
+        lines.append("  - `rotate_shape(angle_degrees)` — rotate around shape center")
+    else:
+        lines.append("  - rotate_shape: NOT available (no rotate handle detected)")
+    lines.append("")
+    lines.append(
+        "`amount` is in logical pixels; reasonable values are a fraction of "
+        "the shape's current size. `scan_handles` re-scans after any action "
+        "that may have changed the shape's geometry."
+    )
+    return "\n".join(lines)
+
+
+_DIR_FOR_RESIZE_SLOT = {
+    "tm": "n", "bm": "s", "mr": "e", "ml": "w",
+    "tl": "nw", "tr": "ne", "bl": "sw", "br": "se",
+}
+
+
+def _invert_resize_slots(resize: Dict[str, Any]) -> List[str]:
+    return [_DIR_FOR_RESIZE_SLOT[k] for k in resize if k in _DIR_FOR_RESIZE_SLOT]
+
+
 _SYSTEM_TEMPLATE = """\
 You are the **Planner** agent for draw.io.
 
@@ -90,6 +148,8 @@ You are the **Planner** agent for draw.io.
 ## DETECTED ELEMENTS
 {element_summary}
 
+{active_selection}
+
 ## OUTPUT FORMAT
 Respond with a single JSON object — no markdown, no commentary:
 {{
@@ -105,6 +165,7 @@ def build_prompt(ui_graph: Dict[str, Any]) -> str:
     return _SYSTEM_TEMPLATE.format(
         tool_table=_tool_table(),
         element_summary=_element_summary(ui_graph),
+        active_selection=_active_selection_summary(ui_graph),
     )
 
 
