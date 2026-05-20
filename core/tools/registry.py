@@ -30,8 +30,10 @@ class ToolNode:
     """
     A tool in the hierarchical tree.
 
-    Leaf nodes (no children) are level 0.
+    Leaf nodes (no children, no override) are level 0.
     Compound nodes auto-compute level = max(child.level) + 1.
+    Actions that compose raw helper functions (not registered ToolNodes)
+    set ``level_override`` to declare their level explicitly.
     """
     name: str
     fn: Callable[..., dict]
@@ -39,9 +41,12 @@ class ToolNode:
     needs_ui_graph: bool
     description: str
     children: List["ToolNode"] = field(default_factory=list)
+    level_override: Optional[int] = None
 
     @property
     def level(self) -> int:
+        if self.level_override is not None:
+            return self.level_override
         if not self.children:
             return 0
         return max(c.level for c in self.children) + 1

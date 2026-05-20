@@ -7,44 +7,86 @@ Agentic AI for closed UIs — domain-portable framework with a persistent symbol
 ```
 Perception Pipeline:
   Screenshot → OpenCV detect → VLM label → state/ui_graph.json
+  + per-shape handle detection (resize / extend / rotate) → state/scene_graph.json
 
 Operation Pipeline:
-  User Task → Executor agent (picks tool from tree) → dispatch() → pyautogui
-                                                          ↑
-                                              ui_graph.json (coordinates)
+  User Task → Executor agent (picks operand from tree)
+            → dispatch()
+            → L1/L2 operand → resolves names + composes
+            → L0 atomic primitives → atom_* helpers → pyautogui
+                                       ↑
+                       state/ui_graph.json   (calibrated coordinates)
+                       state/scene_graph.json (live canvas objects + edges)
 ```
 
-The executor agent **never sees pixel coordinates** — it picks named tools. The tool tree handles coordinate resolution.
+The Executor agent **never sees pixel coordinates** — it picks named operands and references canvas objects by id (`obj_001`, `edge_001`). The framework resolves names to coordinates deterministically.
 
-## Hierarchical tool tree
+## Tool tree — three abstraction layers
 
-Each tool is a **ToolNode** with its own execution logic and children.
-Level is auto-computed: leaf = L0, compound = max(child.level) + 1.
+Each tool is a **ToolNode** with its own execution logic and (optional) children. A node's level is computed from its tree:
 
-Generic L0 primitives live in `core/tools/primitives.py`. Domain-specific L1 compounds live in `domains/<name>/tools.py`.
+- A leaf with no children → **L0** (atom).
+- A node with children → **max(child.level) + 1**.
+- Composers that call bare helper functions (not registered ToolNodes) declare their level explicitly via `level_override=1` so the hierarchy stays meaningful.
+
+### L0 — drawio-aware atomic primitives (`core/tools/primitives.py`)
+Single-step actions. Each is a thin wrapper around one `atom_*` helper plus minimal scene-graph bookkeeping. No name resolution beyond the tool catalog.
 
 ```
-L1 place_and_label(tool_name, label)              ← domains/drawio
-  L0 place_shape(tool_name)                       ← core
-  L0 type_label(text)                             ← core
-  L0 press_escape()                               ← core
-  L0 click_empty_canvas()                         ← core
+L0  place_shape(tool_name)         ← click sidebar icon + Enter
+L0  type_label(text)               ← atom_write
+L0  press_escape() / press_enter() / press_delete()
+L0  select_all()                   ← Cmd+A
+L0  scan_handles()                 ← re-detect selection chrome
+L0  resize_shape(direction, amount)
+L0  extend_shape(direction)
+L0  rotate_shape(angle_degrees)
+L0  move_shape(direction, amount)
+L0  hover_object(object_id)
+L0  connect_shapes(source_id, target_id, source_anchor)
+```
 
-L1 edit_label(node_ref, new_label)                ← domains/drawio
-  L0 double_click_node(node_ref)
+`primitives.py` also defines (but does NOT register as ToolNodes) the raw atoms — `atom_click_at`, `atom_drag`, `atom_press`, `atom_hotkey`, `atom_write`, `atom_move_to`. These are the only places where `pyautogui` is called directly.
+
+### L1 — generic node-aware actions (`core/tools/actions.py`)
+Resolve a node/object reference to coordinates, then call one or more L0 atoms. Domain-agnostic.
+
+```
+L1  click_empty_canvas()                       ← atom_click_at + clear-selection
+L1  click_node(node_ref, clicks=1)             ← resolve + atom_click_at
+L1  double_click_node(node_ref)                ← click_node(clicks=2)
+L1  drag_node(node_ref, target_x, target_y)    ← resolve + atom_drag
+L1  drag_node_near(node_ref, reference_node)   ← resolve + drag_node
+L1  resize_node(node_ref, new_width, new_height)
+L1  hotkey(*keys)                              ← atom_hotkey wrapper
+L1  undo()                                     ← Cmd+Z via atom_hotkey
+```
+
+### L2 — domain compound flows (`domains/drawio/tools.py`)
+Multi-step drawio-specific workflows. Compose L0 + L1 children — auto-computed level = 2.
+
+```
+L2 place_and_label(tool_name, label)
+  L0 place_shape(tool_name)
+  L0 type_label(text)
+  L0 press_escape()
+  L1 click_empty_canvas()
+
+L2 edit_label(node_ref, new_label)
+  L1 double_click_node(node_ref)
   L0 select_all()
   L0 type_label(text)
   L0 press_escape()
-  L0 click_empty_canvas()
+  L1 click_empty_canvas()
 
-L1 delete_node(node_ref)                          ← domains/drawio
-  L0 click_node(node_ref, clicks)
+L2 delete_node(node_ref)
+  L1 click_node(node_ref)
   L0 press_delete()
-  L0 click_empty_canvas()
+  L1 click_empty_canvas()
 
-L1 move_and_deselect(node_ref, target_x, target_y) ← domains/drawio
-  L0 drag_node(node_ref, target_x, target_y)
-  L0 click_empty_canvas()
+L2 move_and_deselect(node_ref, target_x, target_y)
+  L1 drag_node(node_ref, target_x, target_y)
+  L1 click_empty_canvas()
 ```
 
 To visualize: `python tests/demo_integration.py --tree`
@@ -64,19 +106,26 @@ core/                        ← Framework — domain-agnostic
   perception/
     detect.py                ← OpenCV element detection + annotation
     label.py                 ← VLM crop labeling
+    handles.py               ← Detect selection chrome (resize/extend/rotate)
   state/
     ui_graph.py              ← UI graph persistence helpers
+    scene_graph.py           ← Live canvas objects + edges (deterministic)
   tools/
     registry.py              ← ToolNode dataclass, register(), dispatch()
-    primitives.py            ← L0 generic primitives (self-register on import)
-    __init__.py              ← Loads primitives then domain plugin
+    primitives.py            ← L0 drawio-aware atoms + raw atom_* helpers
+    actions.py               ← L1 generic node-aware actions
+    __init__.py              ← Loads primitives, actions, then domain plugin
 
 domains/                     ← Interface-specific plugins (swap to port)
   drawio/
-    tools.py                 ← draw.io L1 compounds (self-register on import)
+    tools.py                 ← draw.io L2 compounds (self-register on import)
 
 state/
-  ui_graph.json              ← Persistent UI graph (perception output)
+  ui_graph.json              ← Calibrated sidebar UI graph (perception)
+  scene_graph.json           ← Live canvas state (objects + edges)
+  
+notebooks/
+  scene_graph_demo.ipynb     ← End-to-end demo: deterministic + LLM-driven
 
 tests/                       ← Integration test scripts
   test_collect_icons.py      ← Perception pipeline test
@@ -187,18 +236,28 @@ python main.py --task "Draw a rectangle labelled Cache" --dry-run
 | File | Owner | Content |
 |------|-------|---------|
 | `config.json` | Manual | Domain selection, paths, models, executor + perception params |
-| `state/ui_graph.json` | Perception | Auto-detected element positions and labels |
+| `state/ui_graph.json` | Perception | Auto-detected sidebar element positions and labels |
+| `state/scene_graph.json` | Framework (deterministic) | Live canvas objects + edges, updated by operands after each geometry-changing op |
 
 ---
+
+## Where to put new tools — picking a layer
+
+| Need | Layer | File | How |
+|------|-------|------|-----|
+| Wrap a single new key/click/drag/keystroke | L0 atom | `core/tools/primitives.py` | Add an `atom_*` helper. Don't register as a ToolNode — atoms are internal. |
+| Single semantic step that maps to one atom + minimal state update (drawio-aware) | L0 primitive | `core/tools/primitives.py` | Add `_fn_*` + `N_*` ToolNode, register it. |
+| Resolve a name/id, OR compose multiple atoms | L1 action | `core/tools/actions.py` | Add `_fn_*` + `N_*` with `level_override=1`, register it. |
+| Multi-step workflow specific to a domain (e.g. drawio's place + label + escape + deselect) | L2 compound | `domains/<name>/tools.py` | Add ToolNode with `children=[…]`; level auto-computes to L2. |
 
 ## Adding a new domain
 
 1. Create `domains/<name>/__init__.py` and `domains/<name>/tools.py`.
-2. In `tools.py`, define compound ToolNodes composed of `core.tools.primitives` leaves; call `register(node)` on each.
+2. In `tools.py`, define compound ToolNodes composed of `core.tools.primitives` and `core.tools.actions` ToolNodes; call `register(node)` on each.
 3. Set `"domain": "<name>"` in `config.json`.
 4. The framework loads the plugin automatically — no other changes needed.
 
-## Adding tools within a domain
+## Example: adding an L2 compound
 
 ```python
 # domains/drawio/tools.py
@@ -207,6 +266,7 @@ from core.tools.primitives import (
     _fn_place_shape, _fn_type_label,
     N_PLACE_SHAPE, N_TYPE_LABEL,
 )
+from core.tools.actions import N_CLICK_EMPTY  # L1 generic action
 
 def _fn_my_compound(ui_graph, tool_name: str, label: str) -> dict:
     steps = [
@@ -219,7 +279,7 @@ N_MY_COMPOUND = ToolNode(
     name="my_compound", fn=_fn_my_compound,
     params=["tool_name", "label"], needs_ui_graph=True,
     description="Place a shape and label it.",
-    children=[N_PLACE_SHAPE, N_TYPE_LABEL],  # level auto-computed
+    children=[N_PLACE_SHAPE, N_TYPE_LABEL, N_CLICK_EMPTY],  # level auto = L2
 )
 register(N_MY_COMPOUND)
 ```

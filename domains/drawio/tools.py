@@ -1,9 +1,10 @@
 """
 drawio compound tools (level 1+).
 
-Domain-specific tool compositions for draw.io. Composes generic
-primitives from ``core.tools.primitives`` into multi-step actions
-matching draw.io's interaction model.
+Domain-specific tool compositions for draw.io. Composes drawio operands
+from ``domains.drawio.operations`` and generic actions from
+``core.tools.actions`` into multi-step actions matching draw.io's
+interaction model.
 
 ## draw.io interaction model
 
@@ -21,13 +22,17 @@ import time
 from typing import Any, Dict
 
 from core.tools.registry import ToolNode, register
-from core.tools.primitives import (
-    _fn_place_shape, _fn_type_label, _fn_press_escape, _fn_click_empty_canvas,
-    _fn_double_click_node, _fn_select_all, _fn_click_node, _fn_press_delete,
-    _fn_drag_node,
-    N_PLACE_SHAPE, N_TYPE_LABEL, N_PRESS_ESCAPE, N_CLICK_EMPTY,
-    N_DOUBLE_CLICK_NODE, N_SELECT_ALL, N_CLICK_NODE, N_PRESS_DELETE,
-    N_DRAG_NODE,
+# drawio L0 operands
+from domains.drawio.operations import (  # noqa: F401 (side-effect: registers L0)
+    _fn_place_shape, _fn_type_label, _fn_press_escape,
+    N_PLACE_SHAPE, N_TYPE_LABEL, N_PRESS_ESCAPE,
+)
+# generic L1 actions
+from core.tools.actions import (
+    _fn_click_empty_canvas, _fn_double_click_node, _fn_select_all,
+    _fn_click_node, _fn_press_delete, _fn_drag_node,
+    N_CLICK_EMPTY, N_DOUBLE_CLICK_NODE, N_SELECT_ALL,
+    N_CLICK_NODE, N_PRESS_DELETE, N_DRAG_NODE,
 )
 
 
@@ -155,3 +160,10 @@ place_and_label = _fn_place_and_label
 edit_label = _fn_edit_label
 delete_node = _fn_delete_node
 move_and_deselect = _fn_move_and_deselect
+
+# Operand aliases re-exported so core/tools/__init__.py can pick them up
+# via the domain module handle (avoids core → domains import direction).
+place_shape = _fn_place_shape
+type_label = _fn_type_label
+press_escape = _fn_press_escape
+click_empty_canvas = _fn_click_empty_canvas
