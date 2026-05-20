@@ -260,7 +260,7 @@ def find_at_point(
 
 def find_closest_to_bbox(
     graph: Dict[str, Any], target_bbox: List[int],
-    max_center_dist: int = 200,
+    max_center_dist: int = 400,
 ) -> Optional[Dict[str, Any]]:
     """Find the object whose bbox center is closest to ``target_bbox``'s center.
 

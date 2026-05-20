@@ -82,17 +82,39 @@ def _refresh_handles(
 # Inter-operation scanner
 # ===========================================================================
 
+def _sync_current_bbox(ui_graph: Dict[str, Any]) -> None:
+    """If the currently-selected scene_graph object has no bbox (because
+    a prior op left drawio in text-edit mode and `press_escape` was
+    skipped), escape + scan to fill it.
+
+    Idempotent and cheap when the bbox is already known.
+    """
+    sg = _get_scene(ui_graph)
+    sel = _sg.get_selected(sg)
+    if sel is None or sel.get("bbox") is not None:
+        return
+    target_id = sel["id"]
+    pyautogui.hotkey("Escape")
+    time.sleep(0.3)
+    _scan_and_reconcile(ui_graph, op_name="sync_current_bbox",
+                        target_id=target_id)
+
+
 def _scan_and_reconcile(
     ui_graph: Dict[str, Any], op_name: str,
     *, hint_bbox: Optional[tuple] = None,
+    target_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """After a geometry-changing op: re-detect handles, then update the
     matching scene_graph object's bbox (and selection state).
 
     Reconciliation strategy — pick the scene_graph object to update by:
-      1. Most-recently-added bbox-less object (a fresh placement that hasn't
-         had its bbox filled in yet).
-      2. Else the object whose center is closest to the new bbox center.
+      1. If ``target_id`` is given (caller knows which object it moved /
+         resized / rotated), update THAT object. Authoritative.
+      2. Else: most-recently-added bbox-less object (a fresh placement
+         that hasn't had its bbox filled in yet).
+      3. Else: the object whose center is closest to the new bbox center
+         (within ``find_closest_to_bbox``'s threshold).
 
     Always called after deterministic operands; never under LLM control.
     """
@@ -105,10 +127,15 @@ def _scan_and_reconcile(
 
     new_bbox = list(handles.shape_bbox)
     target: Optional[Dict[str, Any]] = None
-    for o in reversed(sg["objects"]):
-        if o.get("bbox") is None:
-            target = o
-            break
+
+    if target_id:
+        target = _sg.find_by_id(sg, target_id)
+
+    if target is None:
+        for o in reversed(sg["objects"]):
+            if o.get("bbox") is None:
+                target = o
+                break
     if target is None:
         target = _sg.find_closest_to_bbox(sg, new_bbox)
 
@@ -135,6 +162,10 @@ def _fn_place_shape(ui_graph: Dict[str, Any], tool_name: str) -> dict:
     gets filled in by the inter-op scanner once handles become visible
     again (after type_label + press_escape).
     """
+    # Capture the bbox of any prior bbox-less selection BEFORE the sidebar
+    # click switches focus — otherwise that object stays bbox=? forever.
+    _sync_current_bbox(ui_graph)
+
     x, y = resolve_tool(ui_graph, tool_name)
     print(f"  [L0] place_shape('{tool_name}') → click ({x}, {y}) + Enter")
     pyautogui.click(x, y)
@@ -213,11 +244,27 @@ _RESIZE_DIRECTION_VECTOR: Dict[str, tuple] = {
 
 
 def _ensure_handles(ui_graph: Dict[str, Any]) -> Optional[dict]:
-    """Return the cached handles dict, refreshing once if absent."""
+    """Return the cached handles dict, refreshing once if absent.
+
+    If a refresh finds no handles, the shape is most likely still in
+    drawio's text-edit mode (which hides the resize chrome and turns any
+    in-shape drag into a text selection). We defensively press Escape —
+    which transitions edit-mode → select-mode with handles visible — and
+    re-scan. If THAT also returns no handles, the shape really isn't
+    selected and the caller should error out.
+    """
     h = ui_graph.get("selected_handles")
     if h:
         return h
-    handles = _refresh_handles(ui_graph)
+    _refresh_handles(ui_graph)
+    h = ui_graph.get("selected_handles")
+    if h:
+        return h
+    # No handles after a fresh scan — likely text-edit mode. Escape and retry.
+    print("  (no handles detected — sending defensive Escape to exit potential edit mode)")
+    pyautogui.hotkey("Escape")
+    time.sleep(0.3)
+    _scan_and_reconcile(ui_graph, op_name="defensive_escape")
     return ui_graph.get("selected_handles")
 
 
@@ -236,6 +283,7 @@ def _fn_resize_shape(
                 "error": f"unknown direction '{direction}' — expected one of "
                          f"{sorted(_RESIZE_HANDLE_FOR_DIRECTION)}"}
 
+    _sync_current_bbox(ui_graph)
     h = _ensure_handles(ui_graph)
     if not h or not h.get("resize"):
         return {"status": "error", "tool": "resize_shape",
@@ -252,6 +300,12 @@ def _fn_resize_shape(
 
     print(f"  [L0] resize_shape('{direction}', {amount}) → "
           f"drag handle '{slot}' ({sx},{sy}) → ({tx},{ty})")
+    # Capture which object we're operating on BEFORE the drag, so the
+    # post-op reconcile knows authoritatively which bbox to update.
+    sg = _get_scene(ui_graph)
+    sel = _sg.get_selected(sg)
+    target_id = sel["id"] if sel else None
+
     pyautogui.moveTo(sx, sy)
     time.sleep(0.1)
     pyautogui.mouseDown()
@@ -262,6 +316,7 @@ def _fn_resize_shape(
     _scan_and_reconcile(
         ui_graph, op_name=f"resize_shape:{direction}",
         hint_bbox=tuple(h["shape_bbox"]) if h.get("shape_bbox") else None,
+        target_id=target_id,
     )
     return {"status": "ok", "tool": "resize_shape",
             "direction": direction, "amount": amount,
@@ -283,6 +338,7 @@ def _fn_extend_shape(ui_graph: Dict[str, Any], direction: str) -> dict:
         return {"status": "error", "tool": "extend_shape",
                 "error": f"unknown direction '{direction}' — expected n/s/e/w"}
 
+    _sync_current_bbox(ui_graph)
     h = _ensure_handles(ui_graph)
     if not h or not h.get("extend"):
         return {"status": "error", "tool": "extend_shape",
@@ -338,6 +394,7 @@ def _fn_rotate_shape(ui_graph: Dict[str, Any], angle_degrees: float) -> dict:
     shape center by ``angle_degrees`` (positive = clockwise)."""
     import math
 
+    _sync_current_bbox(ui_graph)
     h = _ensure_handles(ui_graph)
     if not h or not h.get("rotate") or not h.get("shape_bbox"):
         return {"status": "error", "tool": "rotate_shape",
@@ -356,6 +413,10 @@ def _fn_rotate_shape(ui_graph: Dict[str, Any], angle_degrees: float) -> dict:
 
     print(f"  [L0] rotate_shape({angle_degrees}°) → "
           f"drag rotate ({rx},{ry}) → ({tx},{ty})")
+    sg = _get_scene(ui_graph)
+    sel = _sg.get_selected(sg)
+    target_id = sel["id"] if sel else None
+
     pyautogui.moveTo(rx, ry)
     time.sleep(0.1)
     pyautogui.mouseDown()
@@ -363,7 +424,10 @@ def _fn_rotate_shape(ui_graph: Dict[str, Any], angle_degrees: float) -> dict:
     pyautogui.moveTo(tx, ty, duration=config.drag_duration())
     pyautogui.mouseUp()
     time.sleep(0.4)
-    _scan_and_reconcile(ui_graph, op_name=f"rotate_shape:{angle_degrees}")
+    _scan_and_reconcile(
+        ui_graph, op_name=f"rotate_shape:{angle_degrees}",
+        target_id=target_id,
+    )
     return {"status": "ok", "tool": "rotate_shape",
             "angle_degrees": angle_degrees,
             "from": [rx, ry], "to": [tx, ty]}
@@ -377,28 +441,55 @@ def _fn_move_shape(
     ui_graph: Dict[str, Any], direction: str, amount: int,
 ) -> dict:
     """Drag the currently-selected shape in a compass direction by ``amount``
-    logical pixels. Picks any safe interior point of the shape (not on a
-    handle) as the grab point so drawio interprets it as a move drag, not
-    a resize."""
+    logical pixels.
+
+    drawio quirk: the same cyan resize chrome appears in BOTH text-edit
+    mode and select mode, so detecting handles doesn't distinguish the
+    two. But in text-edit mode an interior drag *selects text* rather
+    than moving the shape. To be robust against being called mid-typing,
+    we always:
+
+      1. Press Escape — exits text-edit mode if active; otherwise
+         deselects (harmlessly).
+      2. Re-click the shape using its scene_graph bbox center — restores
+         select-mode with the shape selected, regardless of prior state.
+      3. Drag the interior.
+    """
     direction = direction.lower().strip()
     if direction not in _RESIZE_DIRECTION_VECTOR:
         return {"status": "error", "tool": "move_shape",
                 "error": f"unknown direction '{direction}'"}
 
-    h = _ensure_handles(ui_graph)
-    if not h or not h.get("shape_bbox"):
-        return {"status": "error", "tool": "move_shape",
-                "error": "no shape selected — call click_node first"}
+    # If the selection has no bbox (e.g. still in text-edit mode after
+    # type_label), defensively escape + scan to fill it before we move.
+    _sync_current_bbox(ui_graph)
 
-    bx, by, bw, bh = h["shape_bbox"]
-    # Grab near the shape center, slightly off-center so we're not on the
-    # rotation icon at the top-right.
+    sg = _get_scene(ui_graph)
+    sel = _sg.get_selected(sg)
+    if not sel or not sel.get("bbox"):
+        return {"status": "error", "tool": "move_shape",
+                "error": "no selected scene_graph object with a known bbox "
+                         "(call press_escape after type_label, or click_node first)"}
+
+    target_id = sel["id"]
+    bx, by, bw, bh = sel["bbox"]
     gx, gy = bx + bw // 2, by + bh // 2
+
+    # Step 1: defensive escape (harmless in select mode, exits edit mode).
+    pyautogui.hotkey("Escape")
+    time.sleep(0.25)
+
+    # Step 2: re-click the shape to guarantee select-mode with handles.
+    pyautogui.moveTo(gx, gy)
+    time.sleep(0.1)
+    pyautogui.mouseDown(); time.sleep(0.1); pyautogui.mouseUp()
+    time.sleep(0.3)
+
+    # Step 3: the move drag.
     dx, dy = _RESIZE_DIRECTION_VECTOR[direction]
     tx, ty = int(gx + dx * amount), int(gy + dy * amount)
-
     print(f"  [L0] move_shape('{direction}', {amount}) → "
-          f"drag ({gx},{gy}) → ({tx},{ty})")
+          f"escape+reclick, drag ({gx},{gy}) → ({tx},{ty})")
     pyautogui.moveTo(gx, gy)
     time.sleep(0.1)
     pyautogui.mouseDown()
@@ -406,7 +497,10 @@ def _fn_move_shape(
     pyautogui.moveTo(tx, ty, duration=config.drag_duration())
     pyautogui.mouseUp()
     time.sleep(0.4)
-    _scan_and_reconcile(ui_graph, op_name=f"move_shape:{direction}")
+    _scan_and_reconcile(
+        ui_graph, op_name=f"move_shape:{direction}",
+        target_id=target_id,
+    )
     return {"status": "ok", "tool": "move_shape",
             "direction": direction, "amount": amount,
             "from": [gx, gy], "to": [tx, ty]}
@@ -450,12 +544,31 @@ def _fn_connect_shapes(
     ``source_anchor`` is one of n/s/e/w, or "auto" to pick whichever side
     faces the target.
     """
+    # Defensive: fill the current selection's bbox if missing, so a stale
+    # bbox=? selection doesn't block the connect.
+    _sync_current_bbox(ui_graph)
+
     sg = _get_scene(ui_graph)
     src = _sg.find_by_id(sg, source_id)
     tgt = _sg.find_by_id(sg, target_id)
-    if not src or not tgt or not src.get("bbox") or not tgt.get("bbox"):
+    if not src or not tgt:
         return {"status": "error", "tool": "connect_shapes",
-                "error": "source/target not found or missing bbox"}
+                "error": f"source '{source_id}' or target '{target_id}' "
+                         f"not in scene_graph"}
+
+    # If src has no bbox, click it to select and scan so bbox is filled.
+    if not src.get("bbox"):
+        _fn_click_node(ui_graph, source_id)
+        src = _sg.find_by_id(sg, source_id)
+    # Same for target.
+    if not tgt.get("bbox"):
+        _fn_click_node(ui_graph, target_id)
+        tgt = _sg.find_by_id(sg, target_id)
+
+    if not src.get("bbox") or not tgt.get("bbox"):
+        return {"status": "error", "tool": "connect_shapes",
+                "error": f"could not determine bbox for source or target — "
+                         f"src.bbox={src.get('bbox')}, tgt.bbox={tgt.get('bbox')}"}
 
     sbx, sby, sbw, sbh = src["bbox"]
     tbx, tby, tbw, tbh = tgt["bbox"]
@@ -749,10 +862,11 @@ N_HOVER_OBJECT = ToolNode(
     name="hover_object", fn=_fn_hover_object,
     params=["object_id"], needs_ui_graph=True,
     description=(
-        "Hover the mouse over a scene_graph object WITHOUT clicking it. "
-        "Causes drawio to render the directional extend arrows even though "
-        "the shape is not selected. object_id refers to scene_graph ids "
-        "like 'obj_001'."
+        "RARE. Hovers the cursor over a scene_graph object without clicking; "
+        "drawio renders extend arrows on the hovered (non-selected) shape. "
+        "Only useful as a prep step before extend_shape when growing from "
+        "a non-selected shape. NOT how you draw an edge between two "
+        "existing objects — use connect_shapes for that."
     ),
 )
 
@@ -760,8 +874,10 @@ N_CONNECT_SHAPES = ToolNode(
     name="connect_shapes", fn=_fn_connect_shapes,
     params=["source_id", "target_id", "source_anchor"], needs_ui_graph=True,
     description=(
-        "Draw a connector edge from one scene_graph object to another by "
-        "dragging from the source's edge anchor to the target's center. "
+        "PREFERRED for drawing an edge between two EXISTING scene_graph "
+        "objects. Handles selection of the source internally — you do not "
+        "need to click_node or hover_object first. Drags from the source's "
+        "edge anchor to the target's center and logs the new edge. "
         "source_anchor ∈ n/s/e/w or 'auto' to pick the side facing target."
     ),
 )

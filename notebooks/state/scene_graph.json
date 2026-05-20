@@ -8,32 +8,32 @@
       "type": "Rectangle",
       "label": "Source",
       "bbox": [
-        704,
-        396,
+        526,
+        515,
         84,
         42
       ],
       "anchors": {
         "n": [
-          746,
-          396
+          568,
+          515
         ],
         "s": [
-          746,
-          438
+          568,
+          557
         ],
         "e": [
-          788,
-          417
+          610,
+          536
         ],
         "w": [
-          704,
-          417
+          526,
+          536
         ]
       },
-      "selected": false,
+      "selected": true,
       "created_op": 1,
-      "last_updated_op": 4
+      "last_updated_op": 8
     },
     {
       "id": "obj_002",
@@ -63,7 +63,7 @@
           536
         ]
       },
-      "selected": true,
+      "selected": false,
       "created_op": 5,
       "last_updated_op": 7
     }
@@ -71,15 +71,15 @@
   "edges": [
     {
       "id": "edge_001",
-      "source": "obj_002",
-      "target": "obj_001",
-      "source_anchor": "n",
-      "target_anchor": "s",
+      "source": "obj_001",
+      "target": "obj_002",
+      "source_anchor": "e",
+      "target_anchor": "w",
       "label": ""
     }
   ],
   "metadata": {
-    "op_count": 8,
+    "op_count": 9,
     "last_op": "connect_shapes"
   }
 }

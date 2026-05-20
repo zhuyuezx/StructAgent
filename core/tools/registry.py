@@ -8,6 +8,7 @@ self-register on import of ``domains.<name>.tools``.
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -122,6 +123,25 @@ def print_tree() -> None:
 # Dispatch — unified executor for any level
 # ===========================================================================
 
+def _required_params(node: "ToolNode") -> List[str]:
+    """Return the subset of ``node.params`` that have NO default value in
+    the underlying function — i.e. the ones the caller actually has to
+    provide. Params with defaults are treated as optional.
+    """
+    try:
+        sig = inspect.signature(node.fn)
+    except (TypeError, ValueError):
+        return list(node.params)
+    required: List[str] = []
+    for p in node.params:
+        param = sig.parameters.get(p)
+        if param is None:
+            required.append(p)
+        elif param.default is inspect.Parameter.empty:
+            required.append(p)
+    return required
+
+
 def dispatch(
     tool_name: str,
     params: dict,
@@ -139,12 +159,16 @@ def dispatch(
             ui_graph = config.ui_graph()
         kw["ui_graph"] = ui_graph
 
-    required = node.params
+    # Only params without function-level defaults are actually required.
+    required = _required_params(node)
     missing = [p for p in required if p not in kw]
     if missing:
         return {
             "status": "error", "tool": tool_name,
-            "error": f"Missing required params: {missing}. Expected: {required}",
+            "error": (
+                f"Missing required params: {missing}. "
+                f"Required: {required}. All accepted: {node.params}."
+            ),
         }
 
     try:
