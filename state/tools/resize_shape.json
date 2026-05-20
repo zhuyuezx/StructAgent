@@ -1,0 +1,13 @@
+{
+  "name": "resize_shape",
+  "description": "Resize selected shape by dragging a handle. direction=n/s/e/w/ne/nw/se/sw, amount=px.",
+  "params": [
+    "direction",
+    "amount"
+  ],
+  "needs_ui_graph": true,
+  "children": [
+    "mouse_drag"
+  ],
+  "python_fn": "domains.drawio.operations:_fn_resize_shape"
+}

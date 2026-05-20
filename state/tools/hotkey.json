@@ -1,0 +1,12 @@
+{
+  "name": "hotkey",
+  "description": "Press a key chord given as a list, e.g. [\"command\",\"z\"].",
+  "params": [
+    "keys"
+  ],
+  "needs_ui_graph": false,
+  "children": [
+    "key_combo"
+  ],
+  "python_fn": "core.tools.actions:_fn_hotkey"
+}

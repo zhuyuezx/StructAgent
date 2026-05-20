@@ -1,0 +1,14 @@
+{
+  "name": "drag_node",
+  "description": "Drag a calibrated canvas node to (target_x, target_y).",
+  "params": [
+    "node_ref",
+    "target_x",
+    "target_y"
+  ],
+  "needs_ui_graph": true,
+  "children": [
+    "mouse_drag"
+  ],
+  "python_fn": "core.tools.actions:_fn_drag_node"
+}

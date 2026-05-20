@@ -1,0 +1,10 @@
+{
+  "name": "click_empty_canvas",
+  "description": "Click empty canvas to deselect. Clears Active selection.",
+  "params": [],
+  "needs_ui_graph": true,
+  "children": [
+    "mouse_click"
+  ],
+  "python_fn": "core.tools.actions:_fn_click_empty_canvas"
+}

@@ -1,0 +1,12 @@
+{
+  "name": "rotate_shape",
+  "description": "Rotate selected shape by angle_degrees (positive=clockwise).",
+  "params": [
+    "angle_degrees"
+  ],
+  "needs_ui_graph": true,
+  "children": [
+    "mouse_drag"
+  ],
+  "python_fn": "domains.drawio.operations:_fn_rotate_shape"
+}

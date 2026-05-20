@@ -1,0 +1,35 @@
+{
+  "name": "edit_label",
+  "description": "Re-label an existing canvas node.",
+  "params": [
+    "node_ref",
+    "new_label"
+  ],
+  "needs_ui_graph": true,
+  "steps": [
+    {
+      "tool": "double_click_node",
+      "params": {
+        "node_ref": "$node_ref"
+      }
+    },
+    {
+      "tool": "select_all",
+      "params": {}
+    },
+    {
+      "tool": "type_label",
+      "params": {
+        "text": "$new_label"
+      }
+    },
+    {
+      "tool": "press_escape",
+      "params": {}
+    },
+    {
+      "tool": "click_empty_canvas",
+      "params": {}
+    }
+  ]
+}

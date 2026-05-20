@@ -1,0 +1,14 @@
+{
+  "name": "connect_shapes",
+  "description": "Draw an edge from source to target. source_anchor=n/s/e/w/auto.",
+  "params": [
+    "source_id",
+    "target_id",
+    "source_anchor"
+  ],
+  "needs_ui_graph": true,
+  "children": [
+    "mouse_drag"
+  ],
+  "python_fn": "domains.drawio.operations:_fn_connect_shapes"
+}

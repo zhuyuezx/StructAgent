@@ -1,0 +1,10 @@
+{
+  "name": "press_enter",
+  "description": "Press Enter to confirm input.",
+  "params": [],
+  "needs_ui_graph": false,
+  "children": [
+    "key_press"
+  ],
+  "python_fn": "core.tools.actions:_fn_press_enter"
+}

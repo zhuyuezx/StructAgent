@@ -1,0 +1,12 @@
+{
+  "name": "extend_shape",
+  "description": "Drag an extend arrow to auto-create a connected shape. direction=n/s/e/w.",
+  "params": [
+    "direction"
+  ],
+  "needs_ui_graph": true,
+  "children": [
+    "mouse_drag"
+  ],
+  "python_fn": "domains.drawio.operations:_fn_extend_shape"
+}

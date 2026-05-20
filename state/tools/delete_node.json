@@ -1,0 +1,24 @@
+{
+  "name": "delete_node",
+  "description": "Select and delete a canvas node.",
+  "params": [
+    "node_ref"
+  ],
+  "needs_ui_graph": true,
+  "steps": [
+    {
+      "tool": "click_node",
+      "params": {
+        "node_ref": "$node_ref"
+      }
+    },
+    {
+      "tool": "press_delete",
+      "params": {}
+    },
+    {
+      "tool": "click_empty_canvas",
+      "params": {}
+    }
+  ]
+}

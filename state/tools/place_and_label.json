@@ -1,0 +1,31 @@
+{
+  "name": "place_and_label",
+  "description": "Place a shape, label it, then deselect.",
+  "params": [
+    "tool_name",
+    "label"
+  ],
+  "needs_ui_graph": true,
+  "steps": [
+    {
+      "tool": "place_shape",
+      "params": {
+        "tool_name": "$tool_name"
+      }
+    },
+    {
+      "tool": "type_label",
+      "params": {
+        "text": "$label"
+      }
+    },
+    {
+      "tool": "press_escape",
+      "params": {}
+    },
+    {
+      "tool": "click_empty_canvas",
+      "params": {}
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "undo",
+  "description": "Undo last canvas action (Cmd+Z).",
+  "params": [],
+  "needs_ui_graph": false,
+  "children": [
+    "key_combo"
+  ],
+  "python_fn": "core.tools.actions:_fn_undo"
+}

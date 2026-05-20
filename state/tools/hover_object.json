@@ -1,0 +1,12 @@
+{
+  "name": "hover_object",
+  "description": "Hover over a scene_graph object (reveals extend arrows). NOT for edges.",
+  "params": [
+    "object_id"
+  ],
+  "needs_ui_graph": true,
+  "children": [
+    "mouse_move"
+  ],
+  "python_fn": "domains.drawio.operations:_fn_hover_object"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "move_shape",
+  "description": "Drag selected shape in a compass direction by amount px. direction=n/s/e/w/ne/nw/se/sw.",
+  "params": [
+    "direction",
+    "amount"
+  ],
+  "needs_ui_graph": true,
+  "children": [
+    "key_press",
+    "mouse_click",
+    "mouse_drag"
+  ],
+  "python_fn": "domains.drawio.operations:_fn_move_shape"
+}

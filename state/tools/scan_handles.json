@@ -1,0 +1,10 @@
+{
+  "name": "scan_handles",
+  "description": "Re-detect selection handles for the selected shape.",
+  "params": [],
+  "needs_ui_graph": true,
+  "children": [
+    "mouse_move"
+  ],
+  "python_fn": "domains.drawio.operations:_fn_scan_handles"
+}

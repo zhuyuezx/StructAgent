@@ -1,0 +1,15 @@
+{
+  "name": "resize_node",
+  "description": "Resize a calibrated canvas node by dragging its handle.",
+  "params": [
+    "node_ref",
+    "new_width",
+    "new_height"
+  ],
+  "needs_ui_graph": true,
+  "children": [
+    "mouse_click",
+    "mouse_drag"
+  ],
+  "python_fn": "core.tools.actions:_fn_resize_node"
+}

@@ -8,27 +8,27 @@
       "type": "Rectangle",
       "label": "Source",
       "bbox": [
-        871,
-        507,
+        511,
+        504,
         120,
         60
       ],
       "anchors": {
         "n": [
-          931,
-          507
+          571,
+          504
         ],
         "s": [
-          931,
-          567
+          571,
+          564
         ],
         "e": [
-          991,
-          537
+          631,
+          534
         ],
         "w": [
-          871,
-          537
+          511,
+          534
         ]
       },
       "selected": true,
@@ -41,26 +41,26 @@
       "label": "Target",
       "bbox": [
         691,
-        507,
+        504,
         120,
         60
       ],
       "anchors": {
         "n": [
           751,
-          507
+          504
         ],
         "s": [
           751,
-          567
+          564
         ],
         "e": [
           811,
-          537
+          534
         ],
         "w": [
           691,
-          537
+          534
         ]
       },
       "selected": false,
@@ -73,8 +73,8 @@
       "id": "edge_001",
       "source": "obj_001",
       "target": "obj_002",
-      "source_anchor": "w",
-      "target_anchor": "e",
+      "source_anchor": "e",
+      "target_anchor": "w",
       "label": ""
     }
   ],

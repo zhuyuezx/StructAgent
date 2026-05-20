@@ -1,0 +1,13 @@
+{
+  "name": "place_shape",
+  "description": "Click a sidebar shape to place it on the canvas.",
+  "params": [
+    "tool_name"
+  ],
+  "needs_ui_graph": true,
+  "children": [
+    "mouse_click",
+    "key_press"
+  ],
+  "python_fn": "domains.drawio.operations:_fn_place_shape"
+}

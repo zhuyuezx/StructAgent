@@ -1,0 +1,12 @@
+{
+  "name": "type_label",
+  "description": "Type a text label into the active shape and sync scene_graph.",
+  "params": [
+    "text"
+  ],
+  "needs_ui_graph": true,
+  "children": [
+    "keyboard_type"
+  ],
+  "python_fn": "domains.drawio.operations:_fn_type_label"
+}

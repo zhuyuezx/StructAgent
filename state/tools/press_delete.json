@@ -1,0 +1,10 @@
+{
+  "name": "press_delete",
+  "description": "Press Delete/Backspace to remove the selected element.",
+  "params": [],
+  "needs_ui_graph": false,
+  "children": [
+    "key_press"
+  ],
+  "python_fn": "core.tools.actions:_fn_press_delete"
+}

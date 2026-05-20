@@ -1,0 +1,10 @@
+{
+  "name": "select_all",
+  "description": "Select all text in active field (Cmd+A).",
+  "params": [],
+  "needs_ui_graph": false,
+  "children": [
+    "key_combo"
+  ],
+  "python_fn": "core.tools.actions:_fn_select_all"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "click_node",
+  "description": "Click an existing canvas node by id or label. clicks=1 default.",
+  "params": [
+    "node_ref",
+    "clicks"
+  ],
+  "needs_ui_graph": true,
+  "children": [
+    "mouse_click"
+  ],
+  "python_fn": "core.tools.actions:_fn_click_node"
+}

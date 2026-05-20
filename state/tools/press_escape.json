@@ -1,0 +1,10 @@
+{
+  "name": "press_escape",
+  "description": "Press Escape to exit text-edit; auto-refreshes selection handles.",
+  "params": [],
+  "needs_ui_graph": true,
+  "children": [
+    "key_press"
+  ],
+  "python_fn": "domains.drawio.operations:_fn_press_escape"
+}

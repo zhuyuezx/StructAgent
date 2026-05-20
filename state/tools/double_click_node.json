@@ -1,0 +1,12 @@
+{
+  "name": "double_click_node",
+  "description": "Double-click a node to enter text-edit mode.",
+  "params": [
+    "node_ref"
+  ],
+  "needs_ui_graph": true,
+  "children": [
+    "mouse_click"
+  ],
+  "python_fn": "core.tools.actions:_fn_double_click_node"
+}
