@@ -6,11 +6,14 @@ Single responsibility: take a screenshot and save it to disk.
 
 from __future__ import annotations
 
+import logging
 import os
 
 import pyautogui
 
 from core import config
+
+logger = logging.getLogger(__name__)
 
 
 def screenshot(filename: str = "state.png") -> str:
@@ -27,5 +30,5 @@ def screenshot(filename: str = "state.png") -> str:
     path = os.path.join(save_dir, filename)
     pyautogui.screenshot().save(path)
     abs_path = os.path.abspath(path)
-    print(f"[CAPTURE] Screenshot → {abs_path}")
+    logger.info("Screenshot → %s", abs_path)
     return abs_path

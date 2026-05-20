@@ -7,6 +7,7 @@ hints come from config (or callers).
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Dict, List, Tuple
 
@@ -14,6 +15,8 @@ import cv2
 import numpy as np
 
 from core import config
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -112,5 +115,5 @@ def annotate(
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
 
     cv2.imwrite(output_path, img)
-    print(f"[PERCEPTION] Annotated → {os.path.abspath(output_path)}")
+    logger.info("Annotated → %s", os.path.abspath(output_path))
     return output_path

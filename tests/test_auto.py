@@ -24,8 +24,10 @@ import sys
 import time
 from typing import Any, Dict, List
 
-# Add project root to path
+# Add project root to path so both `core` and `tests` packages resolve.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from tests.helpers import countdown  # noqa: E402
 
 from core import config
 from core.capture import screenshot
@@ -37,12 +39,6 @@ from core.tools import dispatch, TOOL_CATALOG
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _countdown(seconds: int | None = None) -> None:
-    secs = seconds or config.countdown_seconds()
-    for i in range(secs, 0, -1):
-        print(f"  {i}s …")
-        time.sleep(1)
-    print("  GO!\n")
 
 
 def _validate_decision(decision: dict) -> dict:
@@ -250,7 +246,7 @@ def main() -> None:
         return
 
     print("  Switch to draw.io NOW.\n")
-    _countdown()
+    countdown()
 
     runners = {1: run_level_1, 2: run_level_2, 3: run_level_3}
     ok = runners[args.level](ui_graph, dry_run=args.dry_run)

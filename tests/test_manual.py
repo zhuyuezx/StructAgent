@@ -17,8 +17,10 @@ import sys
 import time
 from typing import Any, Dict, List
 
-# Add project root to path
+# Add project root to path so both `core` and `tests` packages resolve.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from tests.helpers import countdown  # noqa: E402
 
 from core import config
 from core.capture import screenshot
@@ -29,12 +31,7 @@ from core.tools import place_shape, type_label, press_escape, click_empty_canvas
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _countdown(seconds: int | None = None) -> None:
-    secs = seconds or config.countdown_seconds()
-    for i in range(secs, 0, -1):
-        print(f"  {i}s …  (move mouse to corner to ABORT)")
-        time.sleep(1)
-    print("  GO!\n")
+
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +41,7 @@ def _countdown(seconds: int | None = None) -> None:
 def run_calibrate() -> None:
     print("=" * 50 + "\n  CALIBRATION\n" + "=" * 50)
     print("\n  Switch to draw.io.\n")
-    _countdown(3)
+    countdown(3)
 
     path = screenshot("calibration.png")
     print(f"\n✅ Screenshot → {path}")
@@ -159,7 +156,7 @@ def main() -> None:
     print(f"  TEST — {args.run}")
     print("=" * 50)
     print("\n  Switch to draw.io NOW.\n")
-    _countdown()
+    countdown()
 
     if args.run == "single":
         run_with_screenshots(

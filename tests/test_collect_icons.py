@@ -16,8 +16,10 @@ import os
 import sys
 import time
 
-# Add project root to path
+# Add project root to path so both `core` and `tests` packages resolve.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from tests.helpers import countdown  # noqa: E402
 
 from core import config
 from core.capture import screenshot
@@ -26,12 +28,7 @@ from core.perception.label import label_icons
 from core.state.ui_graph import save_ui_state
 
 
-def _countdown(seconds: int | None = None) -> None:
-    secs = seconds or config.countdown_seconds()
-    for i in range(secs, 0, -1):
-        print(f"  {i}s …")
-        time.sleep(1)
-    print("  GO!\n")
+
 
 
 def main() -> None:
@@ -53,7 +50,7 @@ def main() -> None:
         print(f"Using existing screenshot: {img_path}")
     else:
         print("  Switch to draw.io NOW.\n")
-        _countdown()
+        countdown()
         img_path = screenshot("explore.png")
 
     # 2. Detect icons

@@ -7,11 +7,14 @@ shape/role label.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
 
 import cv2
 
 from core import config
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +48,7 @@ def label_icons(
     total = len(icons)
     skipped = 0
 
-    print(f"  Model: {model}  |  Timeout: {timeout}s  |  Max retries: {max_retries}")
+    logger.info("  Model: %s  |  Timeout: %ss  |  Max retries: %d", model, timeout, max_retries)
 
     for i, icon in enumerate(icons):
         p = icon.get("_px", {
@@ -82,23 +85,23 @@ def label_icons(
                 label = raw.strip(".,!\"'` ").replace(" ", "_")
                 break
             except httpx.TimeoutException:
-                print(f"  Icon {i:>2}: ⏱ timeout ({timeout}s) — "
-                      f"retry {attempt}/{max_retries}")
+                logger.warning("  Icon %2d: ⏱ timeout (%ss) — "
+                               "retry %d/%d", i, timeout, attempt, max_retries)
             except Exception as e:
                 err = str(e)[:60]
-                print(f"  Icon {i:>2}: ❌ {err} — retry {attempt}/{max_retries}")
+                logger.warning("  Icon %2d: ❌ %s — retry %d/%d", i, err, attempt, max_retries)
 
         if label is None:
             label = "unknown"
             skipped += 1
-            print(f"  Icon {i:>2}: ({icon['x']:>3}, {icon['y']:>3}) → "
-                  f"⚠️ SKIPPED (max retries exceeded)")
+            logger.info("  Icon %2d: (%3d, %3d) → "
+                        "⚠️ SKIPPED (max retries exceeded)", i, icon['x'], icon['y'])
         else:
-            print(f"  Icon {i:>2}: ({icon['x']:>3}, {icon['y']:>3}) → {label}")
+            logger.info("  Icon %2d: (%3d, %3d) → %s", i, icon['x'], icon['y'], label)
 
         labeled.append({**icon, "label": label})
 
     if skipped:
-        print(f"\n  ⚠️  {skipped}/{total} icons skipped (labeled 'unknown')")
+        logger.warning("⚠️  %d/%d icons skipped (labeled 'unknown')", skipped, total)
 
     return labeled

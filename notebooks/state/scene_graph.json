@@ -8,6 +8,38 @@
       "type": "Rectangle",
       "label": "Source",
       "bbox": [
+        891,
+        504,
+        120,
+        60
+      ],
+      "anchors": {
+        "n": [
+          951,
+          504
+        ],
+        "s": [
+          951,
+          564
+        ],
+        "e": [
+          1011,
+          534
+        ],
+        "w": [
+          891,
+          534
+        ]
+      },
+      "selected": true,
+      "created_op": 1,
+      "last_updated_op": 8
+    },
+    {
+      "id": "obj_002",
+      "type": "Rectangle",
+      "label": "Target",
+      "bbox": [
         691,
         504,
         120,
@@ -31,50 +63,18 @@
           534
         ]
       },
-      "selected": true,
-      "created_op": 1,
-      "last_updated_op": 8
-    },
-    {
-      "id": "obj_002",
-      "type": "Rectangle",
-      "label": "Target",
-      "bbox": [
-        871,
-        504,
-        120,
-        60
-      ],
-      "anchors": {
-        "n": [
-          931,
-          504
-        ],
-        "s": [
-          931,
-          564
-        ],
-        "e": [
-          991,
-          534
-        ],
-        "w": [
-          871,
-          534
-        ]
-      },
       "selected": false,
-      "created_op": 4,
+      "created_op": 5,
       "last_updated_op": 7
     }
   ],
   "edges": [
     {
       "id": "edge_001",
-      "source": "obj_001",
-      "target": "obj_002",
-      "source_anchor": "e",
-      "target_anchor": "w",
+      "source": "Source",
+      "target": "Target",
+      "source_anchor": "w",
+      "target_anchor": "e",
       "label": ""
     }
   ],

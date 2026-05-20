@@ -3,12 +3,27 @@ Config — Centralized configuration loader.
 
 Reads ``config.json`` (architectural settings) and ``state/ui_graph.json``
 (persistent UI graph) from the project root.
+
+Configuration values are available in two equivalent ways:
+
+  1. **Namespace objects** (preferred for new code)::
+
+         config.llm.model
+         config.executor.pause
+         config.explorer.screen_scale
+
+  2. **Standalone accessor functions** (backward-compatible)::
+
+         config.llm_model()
+         config.executor_pause()
+         config.screen_scale()
 """
 
 from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from typing import Any, Dict, Tuple
 
 # ---------------------------------------------------------------------------
@@ -27,14 +42,91 @@ _cfg: Dict[str, Any] = _load(_CONFIG_PATH)
 
 
 def reload() -> None:
-    """Re-read config.json."""
-    global _cfg
+    """Re-read config.json and rebuild namespace objects."""
+    global _cfg, llm, executor, explorer
     _cfg = _load(_CONFIG_PATH)
+    llm = _build_llm(_cfg)
+    executor = _build_executor(_cfg)
+    explorer = _build_explorer(_cfg)
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Structured namespace dataclasses
+# ===========================================================================
+
+@dataclass(frozen=True)
+class LLMConfig:
+    """LLM planner settings."""
+    model: str
+    max_steps: int
+
+
+@dataclass(frozen=True)
+class ExecutorConfig:
+    """pyautogui / step timing settings."""
+    failsafe: bool
+    pause: float
+    drag_duration: float
+    type_interval: float
+    step_cooldown: float
+    countdown_seconds: int
+
+
+@dataclass(frozen=True)
+class ExplorerConfig:
+    """Sidebar perception / icon-labeling settings."""
+    screen_scale: int
+    sidebar_region: Tuple[int, int, int, int]
+    icon_size_range: Tuple[int, int]
+    nms_distance: int
+    model: str
+    label_timeout: float
+    label_max_retries: int
+
+
+def _build_llm(cfg: Dict[str, Any]) -> LLMConfig:
+    return LLMConfig(
+        model=cfg["llm"]["model"],
+        max_steps=cfg["llm"]["max_steps"],
+    )
+
+
+def _build_executor(cfg: Dict[str, Any]) -> ExecutorConfig:
+    e = cfg["executor"]
+    return ExecutorConfig(
+        failsafe=e["failsafe"],
+        pause=e["pause"],
+        drag_duration=e["drag_duration"],
+        type_interval=e["type_interval"],
+        step_cooldown=e["step_cooldown"],
+        countdown_seconds=e["countdown_seconds"],
+    )
+
+
+def _build_explorer(cfg: Dict[str, Any]) -> ExplorerConfig:
+    e = cfg.get("explorer", {})
+    r = e.get("sidebar_region", [0, 480, 380, 1120])
+    isz = e.get("icon_size_range", [20, 70])
+    return ExplorerConfig(
+        screen_scale=e.get("screen_scale", 2),
+        sidebar_region=(r[0], r[1], r[2], r[3]),
+        icon_size_range=(isz[0], isz[1]),
+        nms_distance=e.get("nms_distance", 20),
+        model=e.get("model", "qwen3-vl:4b"),
+        label_timeout=e.get("label_timeout", 30),
+        label_max_retries=e.get("label_max_retries", 2),
+    )
+
+
+# Build once at import time
+llm = _build_llm(_cfg)
+executor = _build_executor(_cfg)
+explorer = _build_explorer(_cfg)
+
+
+# ===========================================================================
 # Path helpers
-# ---------------------------------------------------------------------------
+# ===========================================================================
 
 def project_root() -> str:
     return _PROJECT_ROOT
@@ -109,79 +201,61 @@ def empty_canvas_point() -> Tuple[int, int]:
     return (pt[0], pt[1])
 
 
-# ---------------------------------------------------------------------------
-# LLM settings
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Backward-compatible accessor functions (thin aliases)
+#
+# These delegate to the namespace objects above.  New code should prefer
+# ``config.llm.model`` over ``config.llm_model()``, etc.
+# ===========================================================================
 
+# LLM
 def llm_model() -> str:
-    return _cfg["llm"]["model"]
-
+    return llm.model
 
 def llm_max_steps() -> int:
-    return _cfg["llm"]["max_steps"]
+    return llm.max_steps
 
-
-# ---------------------------------------------------------------------------
-# Executor settings
-# ---------------------------------------------------------------------------
-
+# Executor
 def executor_failsafe() -> bool:
-    return _cfg["executor"]["failsafe"]
-
+    return executor.failsafe
 
 def executor_pause() -> float:
-    return _cfg["executor"]["pause"]
-
+    return executor.pause
 
 def drag_duration() -> float:
-    return _cfg["executor"]["drag_duration"]
-
+    return executor.drag_duration
 
 def type_interval() -> float:
-    return _cfg["executor"]["type_interval"]
-
+    return executor.type_interval
 
 def step_cooldown() -> float:
-    return _cfg["executor"]["step_cooldown"]
-
+    return executor.step_cooldown
 
 def countdown_seconds() -> int:
-    return _cfg["executor"]["countdown_seconds"]
+    return executor.countdown_seconds
 
-
-# ---------------------------------------------------------------------------
-# Explorer settings
-# ---------------------------------------------------------------------------
-
+# Explorer
 def screen_scale() -> int:
-    return _cfg.get("explorer", {}).get("screen_scale", 2)
-
+    return explorer.screen_scale
 
 def sidebar_region() -> Tuple[int, int, int, int]:
-    r = _cfg.get("explorer", {}).get("sidebar_region", [0, 480, 380, 1120])
-    return tuple(r)
-
+    return explorer.sidebar_region
 
 def icon_size_range() -> Tuple[int, int]:
-    r = _cfg.get("explorer", {}).get("icon_size_range", [20, 70])
-    return (r[0], r[1])
-
+    return explorer.icon_size_range
 
 def nms_distance() -> int:
-    return _cfg.get("explorer", {}).get("nms_distance", 20)
-
+    return explorer.nms_distance
 
 def explorer_model() -> str:
     """Model for icon labeling (separate from planner model)."""
-    return _cfg.get("explorer", {}).get("model", "qwen3-vl:4b")
-
+    return explorer.model
 
 def label_timeout() -> float:
-    return _cfg.get("explorer", {}).get("label_timeout", 30)
-
+    return explorer.label_timeout
 
 def label_max_retries() -> int:
-    return _cfg.get("explorer", {}).get("label_max_retries", 2)
+    return explorer.label_max_retries
 
 
 # ---------------------------------------------------------------------------

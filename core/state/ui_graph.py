@@ -9,9 +9,12 @@ Phase 0: load/save the current state file (schema preserved from prior
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Dict, List
 
 from core import config
+
+logger = logging.getLogger(__name__)
 
 
 def save_ui_state(icons: List[Dict[str, Any]]) -> str:
@@ -41,7 +44,7 @@ def save_ui_state(icons: List[Dict[str, Any]]) -> str:
     with open(out_path, "w") as f:
         json.dump({"ui_elements": ui_elements}, f, indent=2)
 
-    print(f"[STATE] Wrote {len(ui_elements)} elements → {out_path}")
+    logger.info("Wrote %d elements → %s", len(ui_elements), out_path)
     return out_path
 
 

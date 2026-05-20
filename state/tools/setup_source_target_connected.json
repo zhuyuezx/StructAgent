@@ -1,0 +1,47 @@
+{
+  "name": "setup_source_target_connected",
+  "description": "Place two rectangles (Source, Target), move Source out of the default drop zone, then connect Source\u2192Target. Learned from a successful LLM trace.",
+  "params": [],
+  "needs_ui_graph": true,
+  "steps": [
+    {
+      "tool": "place_shape",
+      "params": {
+        "tool_name": "Rectangle_Tool"
+      }
+    },
+    {
+      "tool": "type_label",
+      "params": {
+        "text": "Source"
+      }
+    },
+    {
+      "tool": "move_shape",
+      "params": {
+        "direction": "e",
+        "amount": 200
+      }
+    },
+    {
+      "tool": "place_shape",
+      "params": {
+        "tool_name": "Rectangle_Tool"
+      }
+    },
+    {
+      "tool": "type_label",
+      "params": {
+        "text": "Target"
+      }
+    },
+    {
+      "tool": "connect_shapes",
+      "params": {
+        "source_id": "Source",
+        "target_id": "Target",
+        "source_anchor": "auto"
+      }
+    }
+  ]
+}

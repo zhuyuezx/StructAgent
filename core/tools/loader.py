@@ -37,11 +37,14 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.tools.registry import ToolNode, register, TOOL_CATALOG
+
+logger = logging.getLogger(__name__)
 
 _STEP_PAUSE = 0.3
 
@@ -68,7 +71,7 @@ def _make_compound_executor(name: str, steps: List[Dict]):
 
         ui_graph = kwargs.get("ui_graph")
         lvl = node_ref[0].level if node_ref[0] else "?"
-        print(f"\n  [L{lvl}] {name}")
+        logger.info("  [L%s] %s", lvl, name)
         results = []
         for step in steps:
             tool = step["tool"]

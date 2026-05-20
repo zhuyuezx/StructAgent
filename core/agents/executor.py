@@ -10,6 +10,7 @@ named tools and references elements by name/id.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +19,8 @@ import ollama
 from core import config
 from core.state import scene_graph as _sg
 from core.tools import TOOL_CATALOG
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -305,10 +308,10 @@ def infer(
         "images": [image_bytes],
     })
 
-    print(f"[EXECUTOR] Querying {model} …")
+    logger.info("Querying %s …", model)
     response = ollama.chat(model=model, messages=messages)
     raw = response["message"]["content"]
-    print(f"[EXECUTOR] Raw response:\n{raw}")
+    logger.debug("Raw response:\n%s", raw)
 
     result = parse_response(raw)
 
@@ -318,5 +321,5 @@ def infer(
     if "tool" not in result:
         raise ValueError(f"Executor response missing 'tool' key: {result}")
 
-    print(f"[EXECUTOR] Decided: {result['tool']}  {result.get('params', {})}")
+    logger.info("Decided: %s  %s", result['tool'], result.get('params', {}))
     return result
