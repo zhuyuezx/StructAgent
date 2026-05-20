@@ -8,38 +8,6 @@
       "type": "Rectangle",
       "label": "Source",
       "bbox": [
-        511,
-        504,
-        120,
-        60
-      ],
-      "anchors": {
-        "n": [
-          571,
-          504
-        ],
-        "s": [
-          571,
-          564
-        ],
-        "e": [
-          631,
-          534
-        ],
-        "w": [
-          511,
-          534
-        ]
-      },
-      "selected": true,
-      "created_op": 1,
-      "last_updated_op": 8
-    },
-    {
-      "id": "obj_002",
-      "type": "Rectangle",
-      "label": "Target",
-      "bbox": [
         691,
         504,
         120,
@@ -63,8 +31,40 @@
           534
         ]
       },
+      "selected": true,
+      "created_op": 1,
+      "last_updated_op": 8
+    },
+    {
+      "id": "obj_002",
+      "type": "Rectangle",
+      "label": "Target",
+      "bbox": [
+        871,
+        504,
+        120,
+        60
+      ],
+      "anchors": {
+        "n": [
+          931,
+          504
+        ],
+        "s": [
+          931,
+          564
+        ],
+        "e": [
+          991,
+          534
+        ],
+        "w": [
+          871,
+          534
+        ]
+      },
       "selected": false,
-      "created_op": 5,
+      "created_op": 4,
       "last_updated_op": 7
     }
   ],
