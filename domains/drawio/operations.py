@@ -46,6 +46,17 @@ _EXTEND_OFFSET_PX = 140
 
 def _fn_place_shape(ui_graph: Dict[str, Any], tool_name: str) -> dict:
     """Place a sidebar shape onto the canvas."""
+    # Pre-click the canvas to ensure draw.io is the active window before we
+    # touch the sidebar.  On macOS the first click on a non-focused window is
+    # an "activation click" — the OS brings the window to the front but
+    # silently discards the click so it never reaches draw.io's sidebar tool.
+    # This happens whenever the user clicked the IDE's "Run cell" button to
+    # start this cell, stealing focus from draw.io.  A canvas pre-click costs
+    # one deselect (harmless here) and guarantees the sidebar click registers.
+    _fcx, _fcy = config.empty_canvas_point()
+    atom_click_at(_fcx, _fcy)
+    time.sleep(0.2)
+
     sync_current_bbox(ui_graph)
     x, y = resolve_tool(ui_graph, tool_name)
     logger.info("  [L1] place_shape('%s') → click (%d, %d) + Enter", tool_name, x, y)
@@ -359,6 +370,60 @@ def _fn_connect_shapes(
             "source": source_id, "target": target_id,
             "source_anchor": source_anchor, "target_anchor": opp,
             "from": [sx, sy], "to": [tgt_cx, tgt_cy]}
+
+
+def _fn_label_edge(ui_graph: Dict[str, Any], edge_id: str, text: str) -> dict:
+    """Double-click an edge midpoint to add or edit its text label.
+
+    Computes the midpoint between the source anchor point and the target
+    anchor point (accurate for straight draw.io edges), double-clicks there
+    to enter the edge's inline label editor, types the text, and escapes.
+    """
+    from core.tools.atoms import atom_write
+    sg = get_scene(ui_graph)
+
+    edge = _sg.find_edge_by_id(sg, edge_id)
+    if edge is None:
+        return {"status": "error", "tool": "label_edge",
+                "error": f"edge '{edge_id}' not in scene_graph"}
+
+    src = _sg.find_by_id(sg, edge["source"])
+    tgt = _sg.find_by_id(sg, edge["target"])
+    if not src or not tgt:
+        return {"status": "error", "tool": "label_edge",
+                "error": f"source/target objects missing for edge '{edge_id}'"}
+    if not src.get("bbox") or not tgt.get("bbox"):
+        return {"status": "error", "tool": "label_edge",
+                "error": "source or target has no bbox — call scan_handles or click_node first"}
+
+    # Use stored anchor points for the midpoint; fall back to bbox centers.
+    sa, ta = edge.get("source_anchor", "e"), edge.get("target_anchor", "w")
+    src_anc = (src.get("anchors") or {}).get(sa)
+    tgt_anc = (tgt.get("anchors") or {}).get(ta)
+    if src_anc and tgt_anc:
+        sx, sy = src_anc
+        ex, ey = tgt_anc
+    else:
+        sbx, sby, sbw, sbh = src["bbox"]
+        tbx, tby, tbw, tbh = tgt["bbox"]
+        sx, sy = sbx + sbw // 2, sby + sbh // 2
+        ex, ey = tbx + tbw // 2, tby + tbh // 2
+
+    mx, my = (sx + ex) // 2, (sy + ey) // 2
+    logger.info("  [L1] label_edge('%s', '%s') → double-click (%d,%d)", edge_id, text, mx, my)
+
+    atom_press("Escape")           # ensure clean state before clicking the edge
+    time.sleep(0.2)
+    atom_click_at(mx, my, clicks=2)
+    time.sleep(0.4)
+    atom_write(text)
+    atom_press("Escape")
+    time.sleep(0.3)
+
+    _sg.update_edge_label(sg, edge_id, text, op_name="label_edge")
+    save_scene(ui_graph)
+    return {"status": "ok", "tool": "label_edge",
+            "edge_id": edge_id, "text": text, "at": [mx, my]}
 
 
 # ===========================================================================

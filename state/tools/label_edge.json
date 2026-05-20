@@ -1,0 +1,8 @@
+{
+  "name": "label_edge",
+  "description": "Double-click the midpoint of an edge to add or edit its text label. Accepts edge_id from the scene graph (e.g. 'edge_001').",
+  "params": ["edge_id", "text"],
+  "needs_ui_graph": true,
+  "children": ["mouse_click", "keyboard_type", "key_press"],
+  "python_fn": "domains.drawio.operations:_fn_label_edge"
+}

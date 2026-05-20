@@ -1,85 +1,165 @@
 {
   "version": 1,
-  "next_object_id": 3,
-  "next_edge_id": 2,
+  "next_object_id": 5,
+  "next_edge_id": 4,
   "objects": [
     {
       "id": "obj_001",
       "type": "Rectangle",
-      "label": "Source",
+      "label": "server",
       "bbox": [
-        891,
-        504,
-        120,
-        60
+        704,
+        613,
+        84,
+        42
       ],
       "anchors": {
         "n": [
-          951,
-          504
+          746,
+          613
         ],
         "s": [
-          951,
-          564
+          746,
+          655
         ],
         "e": [
-          1011,
-          534
+          788,
+          634
         ],
         "w": [
-          891,
-          534
+          704,
+          634
         ]
       },
-      "selected": true,
+      "selected": false,
       "created_op": 1,
-      "last_updated_op": 8
+      "last_updated_op": 4
     },
     {
       "id": "obj_002",
       "type": "Rectangle",
-      "label": "Target",
+      "label": "client1",
       "bbox": [
-        691,
-        504,
-        120,
-        60
+        505,
+        396,
+        84,
+        42
       ],
       "anchors": {
         "n": [
-          751,
-          504
+          547,
+          396
         ],
         "s": [
-          751,
-          564
+          547,
+          438
         ],
         "e": [
-          811,
-          534
+          589,
+          417
         ],
         "w": [
-          691,
-          534
+          505,
+          417
         ]
       },
       "selected": false,
       "created_op": 5,
-      "last_updated_op": 7
+      "last_updated_op": 9
+    },
+    {
+      "id": "obj_003",
+      "type": "Rectangle",
+      "label": "client2",
+      "bbox": [
+        704,
+        396,
+        84,
+        42
+      ],
+      "anchors": {
+        "n": [
+          746,
+          396
+        ],
+        "s": [
+          746,
+          438
+        ],
+        "e": [
+          788,
+          417
+        ],
+        "w": [
+          704,
+          417
+        ]
+      },
+      "selected": false,
+      "created_op": 10,
+      "last_updated_op": 20
+    },
+    {
+      "id": "obj_004",
+      "type": "Rectangle",
+      "label": "client3",
+      "bbox": [
+        911,
+        396,
+        84,
+        42
+      ],
+      "anchors": {
+        "n": [
+          953,
+          396
+        ],
+        "s": [
+          953,
+          438
+        ],
+        "e": [
+          995,
+          417
+        ],
+        "w": [
+          911,
+          417
+        ]
+      },
+      "selected": true,
+      "created_op": 14,
+      "last_updated_op": 22
     }
   ],
   "edges": [
     {
       "id": "edge_001",
-      "source": "Source",
-      "target": "Target",
-      "source_anchor": "w",
-      "target_anchor": "e",
+      "source": "client1",
+      "target": "server",
+      "source_anchor": "s",
+      "target_anchor": "n",
+      "label": ""
+    },
+    {
+      "id": "edge_002",
+      "source": "client2",
+      "target": "server",
+      "source_anchor": "s",
+      "target_anchor": "n",
+      "label": ""
+    },
+    {
+      "id": "edge_003",
+      "source": "client3",
+      "target": "server",
+      "source_anchor": "s",
+      "target_anchor": "n",
       "label": ""
     }
   ],
   "metadata": {
-    "op_count": 9,
+    "op_count": 23,
     "last_op": "connect_shapes"
   }
 }

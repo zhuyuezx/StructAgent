@@ -242,6 +242,25 @@ def find_by_id(graph: Dict[str, Any], object_id: str) -> Optional[Dict[str, Any]
     return None
 
 
+def find_edge_by_id(graph: Dict[str, Any], edge_id: str) -> Optional[Dict[str, Any]]:
+    for e in graph["edges"]:
+        if e["id"] == edge_id:
+            return e
+    return None
+
+
+def update_edge_label(
+    graph: Dict[str, Any], edge_id: str, label: str,
+    op_name: str = "",
+) -> Optional[Dict[str, Any]]:
+    op_idx = _bump_op(graph, op_name or "update_edge_label")
+    for e in graph["edges"]:
+        if e["id"] == edge_id:
+            e["label"] = label
+            return e
+    return None
+
+
 def find_at_point(
     graph: Dict[str, Any], x: int, y: int,
     tolerance: int = 6,

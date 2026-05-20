@@ -185,6 +185,8 @@ the mechanics; you only need to plan around them.
     `click_node(node_ref=obj_NNN)`
 - Re-edit an existing shape's text →
     `double_click_node` → `select_all` → `type_label` → `press_escape`
+- Add or edit the label on an existing edge →
+    `label_edge(edge_id=edge_NNN, text=…)`
 - Clear selection / reset focus (use this when stuck) →
     `click_empty_canvas`
 - Refresh handle detection (if SCENE GRAPH selection shows `bbox=?`) →
