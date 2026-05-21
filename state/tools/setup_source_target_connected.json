@@ -19,9 +19,13 @@
     {
       "tool": "move_shape",
       "params": {
-        "direction": "e",
-        "amount": 200
+        "direction": "w",
+        "amount": 180
       }
+    },
+    {
+      "tool": "click_empty_canvas",
+      "params": {}
     },
     {
       "tool": "place_shape",

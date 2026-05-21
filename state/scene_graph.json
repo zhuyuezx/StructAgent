@@ -1,85 +1,11 @@
 {
   "version": 1,
-  "next_object_id": 3,
-  "next_edge_id": 2,
-  "objects": [
-    {
-      "id": "obj_001",
-      "type": "Rectangle",
-      "label": "Source",
-      "bbox": [
-        505,
-        515,
-        84,
-        42
-      ],
-      "anchors": {
-        "n": [
-          547,
-          515
-        ],
-        "s": [
-          547,
-          557
-        ],
-        "e": [
-          589,
-          536
-        ],
-        "w": [
-          505,
-          536
-        ]
-      },
-      "selected": true,
-      "created_op": 1,
-      "last_updated_op": 8
-    },
-    {
-      "id": "obj_002",
-      "type": "Rectangle",
-      "label": "Target",
-      "bbox": [
-        708,
-        515,
-        84,
-        42
-      ],
-      "anchors": {
-        "n": [
-          750,
-          515
-        ],
-        "s": [
-          750,
-          557
-        ],
-        "e": [
-          792,
-          536
-        ],
-        "w": [
-          708,
-          536
-        ]
-      },
-      "selected": false,
-      "created_op": 5,
-      "last_updated_op": 7
-    }
-  ],
-  "edges": [
-    {
-      "id": "edge_001",
-      "source": "obj_001",
-      "target": "obj_002",
-      "source_anchor": "e",
-      "target_anchor": "w",
-      "label": ""
-    }
-  ],
+  "next_object_id": 1,
+  "next_edge_id": 1,
+  "objects": [],
+  "edges": [],
   "metadata": {
-    "op_count": 9,
-    "last_op": "connect_shapes"
+    "op_count": 0,
+    "last_op": null
   }
 }
