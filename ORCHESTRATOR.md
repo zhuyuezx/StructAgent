@@ -106,6 +106,8 @@ The Planner is invoked in three places, not on every step:
 
 This is a much smaller LLM footprint than today's per-turn executor. It shifts the LLM toward what it's best at (planning and patching structured artifacts) and away from what it's worst at (running long sequential procedures without drift).
 
+**Validation (Phase 0, in tree today).** The executor now supports a `screenshot_path=None` text-only mode (`core.agents.executor.infer()`), and `notebooks/text_only_executor_test.ipynb` runs the source/target task with no screenshot at any step. A successful pass there confirms call (1) above is feasible — the planner can emit the right sequence from text + SCENE GRAPH alone, without a visual. If it ever fails, the failure mode tells us exactly which parts of `summary_for_prompt` are missing information the visual was carrying.
+
 ## User's role
 
 First-class, not an escape hatch.

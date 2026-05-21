@@ -71,8 +71,8 @@
   "edges": [
     {
       "id": "edge_001",
-      "source": "Source",
-      "target": "Target",
+      "source": "obj_001",
+      "target": "obj_002",
       "source_anchor": "e",
       "target_anchor": "w",
       "label": ""

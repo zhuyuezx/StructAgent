@@ -20,7 +20,7 @@ Operation Pipeline:
                state/scene_graph.json (live canvas objects + edges)
 ```
 
-The Executor agent **never sees pixel coordinates** — it picks named tools and references canvas objects by id (`obj_001`, `edge_001`). The framework resolves names to coordinates deterministically.
+The Executor agent **never sees pixel coordinates** — it picks named tools and references canvas objects by id (`obj_001`, `edge_001`). The framework resolves names to coordinates deterministically. The Executor can also run in a **text-only mode** with the screenshot dropped from the user message (the SCENE GRAPH alone drives planning) — see [Executor inference modes](#executor-inference-modes--screenshot--sg-vs-text-only) below.
 
 ## Tool tree — three abstraction layers
 
@@ -109,6 +109,29 @@ if check_trace_success(results):
 
 This writes `state/tools/my_new_tool.json` and immediately registers the tool in the live catalog. The LLM executor can also call `save_trace_as_tool` directly.
 
+## Executor inference modes — screenshot + SG vs text-only
+
+`core.agents.executor.infer()` takes `screenshot_path` as an optional argument. The caller decides per turn whether the LLM sees a screenshot; the system prompt's `# INPUTS YOU RECEIVE` block adapts to match.
+
+```python
+from core.agents.executor import infer
+
+# 1) screenshot + SG (default — used by scene_graph_demo and complex_tasks_demo).
+decision = infer(task, ui_graph, screenshot_path=img_path, history=history)
+
+# 2) text-only — used by text_only_executor_test.ipynb.
+decision = infer(task, ui_graph, screenshot_path=None, history=history)
+```
+
+| Mode | LLM-visible inputs | When to use |
+|---|---|---|
+| `screenshot_path=<path>` | Screenshot **+** SCENE GRAPH | Default. The SCENE GRAPH is authoritative; the screenshot catches visual issues the symbolic state misses. |
+| `screenshot_path=None` | SCENE GRAPH only | Low-cost planning when symbolic state is known to be complete. Forces the LLM to reason over the deterministic graph rather than pattern-match pixels. |
+
+Both modes share the same catalog, decision procedure, scene-graph block, and active-selection block — only the `INPUTS YOU RECEIVE` paragraph and the user-message image attachment vary. See `text_only_executor_test.ipynb` for a run-through of the same source/target task in both modes and a step-count comparison.
+
+The framework still takes its **own** screenshots internally for handle detection (`_scan_and_reconcile` after geometry-changing ops). That's about keeping the SCENE GRAPH accurate; it is independent of what the LLM sees.
+
 ## Project structure
 
 ```
@@ -150,8 +173,14 @@ state/
     ...
 
 notebooks/
-  scene_graph_demo.ipynb     ← End-to-end demo: deterministic + LLM-driven
-  visualize.ipynb            ← Tool tree visualizer (NetworkX graph + summary)
+  scene_graph_demo.ipynb         ← End-to-end demo: deterministic + LLM-driven
+  complex_tasks_demo.ipynb       ← Multi-shape layouts (CCW ring + server-client star)
+  text_only_executor_test.ipynb  ← Same source/target task with NO screenshot input
+  visualize.ipynb                ← Tool tree visualizer (NetworkX graph + summary)
+
+frontend/                     ← Browser UI (Vite + React) wrapping the catalog
+core/api.py                   ← FastAPI sidecar serving the frontend
+ORCHESTRATOR.md               ← Design doc for the next-step visual orchestrator
 ```
 
 ## Plugin loading

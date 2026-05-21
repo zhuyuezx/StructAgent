@@ -5,6 +5,16 @@ Constructs a coordinate-free prompt from the tool catalog and detected
 element names, sends it to a local LLM via Ollama, and parses the JSON
 response. The executor never sees pixel coordinates — it only picks
 named tools and references elements by name/id.
+
+Two inference modes, selected per-call via ``infer(screenshot_path=…)``:
+
+- **screenshot+SG** (default) — the LLM gets both the screenshot and the
+  SCENE GRAPH block. The prompt tells it to treat the SCENE GRAPH as
+  authoritative and the screenshot as a visual cross-check.
+- **text-only** — pass ``screenshot_path=None``. The prompt tells the LLM
+  the SCENE GRAPH is its only view of the canvas, and no image is attached
+  to the user message. Useful for low-cost planning when the symbolic state
+  is known to be complete; see ``notebooks/text_only_executor_test.ipynb``.
 """
 
 from __future__ import annotations
@@ -123,9 +133,39 @@ def _invert_resize_slots(resize: Dict[str, Any]) -> List[str]:
     return [_DIR_FOR_RESIZE_SLOT[k] for k in resize if k in _DIR_FOR_RESIZE_SLOT]
 
 
+_INPUTS_SCREENSHOT = """\
+# INPUTS YOU RECEIVE
+
+Every turn you get TWO views of the canvas:
+
+- A **screenshot** of the application window (attached to the user message).
+- The **SCENE GRAPH** below — the framework's deterministic symbolic model
+  of canvas objects, edges, and selection.
+
+Treat the SCENE GRAPH as authoritative. The screenshot is a visual cross-check
+useful for noticing things the symbolic state cannot capture (overlap, fine
+alignment, off-canvas drift). When the two agree, plan from the SCENE GRAPH.
+When they disagree, the SCENE GRAPH is stale; call `scan_handles` to refresh."""
+
+_INPUTS_TEXT_ONLY = """\
+# INPUTS YOU RECEIVE
+
+Every turn you get ONE view of the canvas:
+
+- The **SCENE GRAPH** below — the framework's deterministic symbolic model
+  of canvas objects, edges, and selection. **This is your ONLY view.**
+
+You do NOT receive a screenshot. Every reasoning step must cite SCENE GRAPH
+content directly. If the SCENE GRAPH lacks the information you need to choose
+a tool, call `scan_handles` (refreshes selection chrome) or
+`click_empty_canvas` (resets focus) rather than guessing."""
+
+
 _SYSTEM_TEMPLATE = """\
 You are the **Executor** agent for draw.io. You pick exactly one tool
 per turn. You do NOT specify coordinates — the framework owns those.
+
+{inputs_block}
 
 # DECISION PROCEDURE — run these 4 steps before every response
 
@@ -231,10 +271,24 @@ fences. Reasoning must explicitly cite SCENE GRAPH state.
 """
 
 
-def build_prompt(ui_graph: Dict[str, Any]) -> str:
-    """Build the system prompt for the LLM."""
+def build_prompt(ui_graph: Dict[str, Any], use_screenshot: bool = True) -> str:
+    """Build the system prompt for the LLM.
+
+    Parameters
+    ----------
+    ui_graph:
+        Current UI graph (with scene_graph + selected_handles mounted).
+    use_screenshot:
+        If True (default), the INPUTS block tells the LLM to expect a
+        screenshot alongside the SCENE GRAPH. If False, the INPUTS block
+        states the SCENE GRAPH is the sole view of the canvas. The choice
+        must match what the caller actually attaches to the user message
+        — see ``infer(screenshot_path=...)``.
+    """
     sg_data = ui_graph.get("scene_graph") or _sg.load()
+    inputs_block = _INPUTS_SCREENSHOT if use_screenshot else _INPUTS_TEXT_ONLY
     return _SYSTEM_TEMPLATE.format(
+        inputs_block=inputs_block,
         tool_table=_tool_table(),
         element_summary=_element_summary(ui_graph),
         scene_graph_summary=_sg.summary_for_prompt(sg_data),
@@ -279,38 +333,50 @@ def parse_response(raw: str) -> Dict[str, Any]:
 def infer(
     task: str,
     ui_graph: Dict[str, Any],
-    screenshot_path: str,
+    screenshot_path: Optional[str] = None,
     history: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     Ask the LLM to choose the next tool.
 
+    The caller decides whether the LLM sees a screenshot on this turn by
+    passing (or omitting) ``screenshot_path``. The system prompt adapts:
+
+    - ``screenshot_path`` is a path → the prompt's INPUTS block says
+      "you receive a screenshot + SCENE GRAPH", and the image is attached
+      to the user message.
+    - ``screenshot_path`` is ``None`` → the prompt's INPUTS block says
+      "SCENE GRAPH is your only view", and no image is attached.
+
+    Both modes share the rest of the prompt (tool catalog, decision
+    procedure, scene-graph summary, active selection, drawio quirks).
+
     Args:
         task:            Natural-language task description.
         ui_graph:        Current UI graph (element names shown, no coords).
-        screenshot_path: Path to screenshot (sent as image).
+        screenshot_path: Path to a PNG to attach. Pass ``None`` for
+                         text-only inference (SCENE GRAPH as sole input).
         history:         Prior conversation turns for multi-step reasoning.
 
     Returns:
         Dict with keys: ``reasoning``, ``tool``, ``params``.
     """
+    use_screenshot = screenshot_path is not None
     model = config.llm_model()
-    prompt = build_prompt(ui_graph)
+    prompt = build_prompt(ui_graph, use_screenshot=use_screenshot)
 
     messages: List[Dict[str, Any]] = [{"role": "system", "content": prompt}]
     if history:
         messages.extend(history)
 
-    with open(screenshot_path, "rb") as f:
-        image_bytes = f.read()
+    user_msg: Dict[str, Any] = {"role": "user", "content": f"Task: {task}"}
+    if use_screenshot:
+        with open(screenshot_path, "rb") as f:
+            user_msg["images"] = [f.read()]
+    messages.append(user_msg)
 
-    messages.append({
-        "role": "user",
-        "content": f"Task: {task}",
-        "images": [image_bytes],
-    })
-
-    logger.info("Querying %s …", model)
+    mode = "screenshot+sg" if use_screenshot else "text-only"
+    logger.info("Querying %s (%s) …", model, mode)
     response = ollama.chat(model=model, messages=messages)
     raw = response["message"]["content"]
     logger.debug("Raw response:\n%s", raw)
