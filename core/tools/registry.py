@@ -42,6 +42,11 @@ class ToolNode:
     description: str
     children: List["ToolNode"] = field(default_factory=list)
     level_override: Optional[int] = None
+    # Optional per-param type/description overrides. Keyed by param name; each
+    # value is a ParamSpec dict (see core.tools.param_specs). When absent, the
+    # central PARAM_SPECS map supplies a spec by param name. Used by the Planner
+    # to fill the param space — see core/agents/planner.py.
+    param_specs: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def level(self) -> int:

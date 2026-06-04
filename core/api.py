@@ -14,6 +14,11 @@ Endpoints
     DELETE /api/tools/{name}                 delete a saved compound tool
     POST   /api/tools/{name}/run             dispatch a tool by name
     POST   /api/run-steps                    run an ad-hoc step list (no save)
+    POST   /api/plan                         LLM: text prompt -> parameterized plan
+    POST   /api/plan/chat                     LLM: conversational plan refinement
+    POST   /api/run-plan                     run a plan with checkpoints + screenshots
+    POST   /api/repair                       LLM: corrective plan from current state
+    GET    /api/screenshot/{name}            serve a captured screenshot (PNG)
     GET    /api/scene-graph                  current scene graph
     POST   /api/scene-graph/reset            reset scene graph
     GET    /api/ui-graph                     current UI graph (sidebar elements)
@@ -24,15 +29,18 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from core import config
+from core import orchestrator
 from core.state import scene_graph as sg
 from core.tools import TOOL_CATALOG, dispatch
 from core.tools.loader import _make_compound_executor, load_tools_from_dir
@@ -164,6 +172,48 @@ class RunResult(BaseModel):
     tool: Optional[str] = None
     result: Dict[str, Any]
     scene_graph: Dict[str, Any]
+
+
+class PlanBody(BaseModel):
+    task: str
+    use_screenshot: bool = False  # screenshot+SG planning vs text-only (default)
+    countdown: int = 0            # seconds before the screenshot (focus drawio)
+
+
+class PlanResult(BaseModel):
+    reasoning: str = ""
+    # steps are {tool, params, checkpoint?, reasoning?} — kept loose on purpose.
+    steps: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ChatPlanBody(BaseModel):
+    # Full conversation [{role, content}, ...]; must end with a 'user' turn.
+    # Assistant turns carry the prior plan JSON so the model keeps context.
+    messages: List[Dict[str, str]]
+    use_screenshot: bool = False
+    countdown: int = 0
+
+
+class RunPlanBody(BaseModel):
+    steps: List[Dict[str, Any]]
+    countdown: int = 0
+    stop_on_checkpoint_fail: bool = False
+    clear_canvas: bool = False  # wipe the draw.io canvas + scene graph first
+
+
+class RunPlanResult(BaseModel):
+    ok: bool                      # every step dispatched cleanly
+    checkpoints_ok: bool          # no checkpoint failed
+    trace: List[Dict[str, Any]]   # per-step {tool, params, result, checkpoint?}
+    scene_graph: Dict[str, Any]
+
+
+class RepairBody(BaseModel):
+    task: str                                  # the original task
+    failed_steps: List[Dict[str, Any]] = Field(default_factory=list)
+    user_note: str = ""                        # free-text guidance for the fix
+    use_screenshot: bool = False
+    countdown: int = 0
 
 
 # ===========================================================================
@@ -365,6 +415,154 @@ def run_steps(body: RunStepsBody) -> RunResult:
         result=result,
         scene_graph=_G["scene_graph"],
     )
+
+
+# ===========================================================================
+# Planner + orchestrator endpoints
+# ===========================================================================
+
+def _clear_canvas() -> Dict[str, Any]:
+    """Wipe the draw.io canvas (select-all + delete) AND reset the scene graph.
+
+    Driven through the normal dispatch path so it respects the focused window;
+    assumes draw.io is focused (call after the countdown). Unlike an undo loop,
+    select-all + delete clears shapes from earlier sessions too.
+    """
+    logger.info("[api] clearing draw.io canvas (select-all + delete)")
+    dispatch("click_empty_canvas", {}, ui_graph=_G)
+    time.sleep(0.2)
+    dispatch("select_all", {}, ui_graph=_G)       # Cmd+A selects all cells
+    time.sleep(0.2)
+    dispatch("press_delete", {}, ui_graph=_G)      # delete the selection
+    time.sleep(0.3)
+    _G["scene_graph"] = sg.reset()
+    _G["selected_handles"] = None
+    return _G["scene_graph"]
+
+
+def _basename_screenshots(trace: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Rewrite absolute checkpoint screenshot paths to bare filenames.
+
+    The frontend loads them via GET /api/screenshot/{name}; we never expose
+    absolute server paths.
+    """
+    for entry in trace:
+        cp = entry.get("checkpoint")
+        if cp and cp.get("screenshot"):
+            cp["screenshot"] = os.path.basename(cp["screenshot"])
+    return trace
+
+
+@app.post("/api/plan", response_model=PlanResult)
+def plan(body: PlanBody) -> PlanResult:
+    """Turn a text prompt into a full parameterized plan (one LLM call).
+
+    The plan's steps may carry ``checkpoint`` objects; nothing is executed
+    here. Imported lazily so the rest of the API works without ``ollama``.
+    """
+    from core.agents.planner import plan as _plan
+
+    _refresh_scene_graph()
+    shot: Optional[str] = None
+    if body.use_screenshot:
+        _countdown(body.countdown)
+        from core.capture import screenshot as _screenshot
+        shot = _screenshot("_plan_input.png")
+    try:
+        out = _plan(body.task, _G, screenshot_path=shot)
+    except Exception as e:
+        raise HTTPException(502, f"planner failed: {e}")
+    return PlanResult(reasoning=out.get("reasoning", ""),
+                      steps=out.get("steps", []))
+
+
+@app.post("/api/plan/chat", response_model=PlanResult)
+def plan_chat(body: ChatPlanBody) -> PlanResult:
+    """Conversational planning — refine the plan over a running thread.
+
+    The caller keeps the whole conversation and POSTs it each turn; the model
+    re-emits the full updated plan. ``reasoning`` is the assistant's reply.
+    """
+    from core.agents.planner import chat_plan
+
+    if not body.messages or body.messages[-1].get("role") != "user":
+        raise HTTPException(400, "messages must be non-empty and end with a user turn")
+    _refresh_scene_graph()
+    shot: Optional[str] = None
+    if body.use_screenshot:
+        _countdown(body.countdown)
+        from core.capture import screenshot as _screenshot
+        shot = _screenshot("_plan_input.png")
+    try:
+        out = chat_plan(body.messages, _G, screenshot_path=shot)
+    except Exception as e:
+        raise HTTPException(502, f"chat planning failed: {e}")
+    return PlanResult(reasoning=out.get("reasoning", ""), steps=out.get("steps", []))
+
+
+@app.post("/api/run-plan", response_model=RunPlanResult)
+def run_plan(body: RunPlanBody) -> RunPlanResult:
+    """Execute a plan deterministically, with checkpoint screenshots + checks.
+
+    Each step with a ``checkpoint`` is screenshotted and its assertions are
+    evaluated against the live scene graph; results land on the trace.
+    """
+    if not body.steps:
+        raise HTTPException(400, "No steps to run.")
+    unknown = [s.get("tool") for s in body.steps
+               if s.get("tool") not in TOOL_CATALOG]
+    if unknown:
+        raise HTTPException(400, f"Unknown tool(s) in steps: {unknown}")
+
+    _countdown(body.countdown)
+    if body.clear_canvas:
+        _clear_canvas()          # draw.io is focused now (post-countdown)
+    _refresh_scene_graph()
+    trace = orchestrator.run_plan(
+        body.steps, _G,
+        stop_on_checkpoint_fail=body.stop_on_checkpoint_fail,
+    )
+    return RunPlanResult(
+        ok=orchestrator.plan_succeeded(trace),
+        checkpoints_ok=orchestrator.checkpoints_passed(trace),
+        trace=_basename_screenshots(trace),
+        scene_graph=_G["scene_graph"],
+    )
+
+
+@app.post("/api/repair", response_model=PlanResult)
+def repair(body: RepairBody) -> PlanResult:
+    """Produce a corrective plan from the current scene graph (Phase 3).
+
+    Reuses the planner against the live scene graph plus the flagged/failed
+    steps and the user's note. The returned plan is reviewed + run like any
+    other (POST /api/run-plan). Imported lazily (needs ``ollama``).
+    """
+    from core.agents.planner import repair as _repair
+
+    _refresh_scene_graph()
+    shot: Optional[str] = None
+    if body.use_screenshot:
+        _countdown(body.countdown)
+        from core.capture import screenshot as _screenshot
+        shot = _screenshot("_repair_input.png")
+    try:
+        out = _repair(body.task, _G, failed_steps=body.failed_steps,
+                      user_note=body.user_note, screenshot_path=shot)
+    except Exception as e:
+        raise HTTPException(502, f"repair failed: {e}")
+    return PlanResult(reasoning=out.get("reasoning", ""),
+                      steps=out.get("steps", []))
+
+
+@app.get("/api/screenshot/{name}")
+def get_screenshot(name: str) -> FileResponse:
+    """Serve a captured screenshot by filename (no path traversal)."""
+    safe = os.path.basename(name)
+    path = os.path.join(config.screenshots_dir(), safe)
+    if not os.path.isfile(path):
+        raise HTTPException(404, f"No screenshot '{safe}'")
+    return FileResponse(path, media_type="image/png")
 
 
 # ===========================================================================

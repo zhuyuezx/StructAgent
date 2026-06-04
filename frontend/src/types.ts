@@ -72,3 +72,99 @@ export interface SceneGraph {
   edges: SceneEdge[];
   metadata: { op_count: number; last_op: string | null };
 }
+
+// === Planner + checkpoints (Phase 2) ======================================
+
+export interface Assertion {
+  check: string;
+  op?: string;
+  value?: unknown;
+  label?: string;
+  id?: string;
+  source?: string;
+  target?: string;
+  directed?: boolean;
+}
+
+export interface Checkpoint {
+  description?: string;
+  screenshot?: boolean;
+  assert: Assertion[];
+}
+
+export interface PlanStep {
+  tool: string;
+  params: Record<string, unknown>;
+  reasoning?: string;
+  checkpoint?: Checkpoint;
+}
+
+export interface PlanBody {
+  task: string;
+  use_screenshot?: boolean;
+  countdown?: number;
+}
+
+export interface PlanResult {
+  reasoning: string;
+  steps: PlanStep[];
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatPlanBody {
+  messages: ChatMessage[];
+  use_screenshot?: boolean;
+  countdown?: number;
+}
+
+export interface AssertionResult {
+  check: string | null;
+  passed: boolean;
+  detail: string;
+  spec: Assertion;
+}
+
+export interface CheckpointResult {
+  passed: boolean | null;
+  description: string;
+  results?: AssertionResult[];
+  screenshot?: string | null; // filename, served by GET /api/screenshot/{name}
+  screenshot_error?: string;
+  skipped?: boolean;
+  reason?: string;
+}
+
+export interface TraceEntry {
+  step: number;
+  tool: string;
+  params: Record<string, unknown>;
+  result: Record<string, unknown>;
+  checkpoint?: CheckpointResult;
+  flagged_wrong?: boolean;
+}
+
+export interface RepairBody {
+  task: string;
+  failed_steps: TraceEntry[];
+  user_note?: string;
+  use_screenshot?: boolean;
+  countdown?: number;
+}
+
+export interface RunPlanBody {
+  steps: PlanStep[];
+  countdown?: number;
+  stop_on_checkpoint_fail?: boolean;
+  clear_canvas?: boolean;
+}
+
+export interface RunPlanResult {
+  ok: boolean;
+  checkpoints_ok: boolean;
+  trace: TraceEntry[];
+  scene_graph: SceneGraph;
+}

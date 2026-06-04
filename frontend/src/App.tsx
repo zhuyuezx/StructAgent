@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { ComposerForm } from './components/ComposerForm';
 import { ExecutePanel } from './components/ExecutePanel';
+import { PlanPanel } from './components/PlanPanel';
 import { SceneGraphView } from './components/SceneGraphView';
 import { ToolDetail } from './components/ToolDetail';
 import { ToolTree } from './components/ToolTree';
@@ -11,7 +12,7 @@ import type {
   ToolSummary,
 } from './types';
 
-type Tab = 'inspect' | 'execute' | 'compose';
+type Tab = 'inspect' | 'execute' | 'compose' | 'plan';
 
 export default function App() {
   const [tools, setTools] = useState<ToolSummary[]>([]);
@@ -132,6 +133,12 @@ export default function App() {
           >
             Compose
           </button>
+          <button
+            className={tab === 'plan' ? 'active' : ''}
+            onClick={() => setTab('plan')}
+          >
+            Plan
+          </button>
         </nav>
         {globalError && <div className="app__error">{globalError}</div>}
       </header>
@@ -163,6 +170,13 @@ export default function App() {
                 setComposerSeed(null);
                 reloadTools();
               }}
+            />
+          )}
+          {tab === 'plan' && (
+            <PlanPanel
+              tools={tools}
+              onSceneGraphUpdated={reloadSceneGraph}
+              onToolSaved={reloadTools}
             />
           )}
         </section>

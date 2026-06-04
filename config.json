@@ -4,6 +4,7 @@
     "screenshots_dir": "screenshots",
     "test_output_dir": "test_output",
     "state_dir": "state",
+    "scene_graph_dir": "scene_graph",
     "ui_graph_file": "ui_graph.json"
   },
   "calibration": {

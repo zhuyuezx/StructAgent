@@ -2,7 +2,13 @@
 // (see vite.config.ts), so we can use relative URLs.
 
 import type {
+  ChatPlanBody,
+  PlanBody,
+  PlanResult,
+  RepairBody,
   RunBody,
+  RunPlanBody,
+  RunPlanResult,
   RunResult,
   RunStepsBody,
   SaveToolBody,
@@ -70,4 +76,24 @@ export const api = {
     request<SceneGraph>('/scene-graph/reset', { method: 'POST' }),
   getUiGraph: () =>
     request<{ domain: string; sidebar_shapes: string[] }>('/ui-graph'),
+  // Planner + orchestrator (Phase 2)
+  plan: (body: PlanBody) =>
+    request<PlanResult>('/plan', { method: 'POST', body: JSON.stringify(body) }),
+  planChat: (body: ChatPlanBody) =>
+    request<PlanResult>('/plan/chat', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  runPlan: (body: RunPlanBody) =>
+    request<RunPlanResult>('/run-plan', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  repair: (body: RepairBody) =>
+    request<PlanResult>('/repair', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  screenshotUrl: (name: string) =>
+    `${BASE}/screenshot/${encodeURIComponent(name)}`,
 };

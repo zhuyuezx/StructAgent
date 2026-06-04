@@ -24,10 +24,6 @@
       }
     },
     {
-      "tool": "click_empty_canvas",
-      "params": {}
-    },
-    {
       "tool": "place_shape",
       "params": {
         "tool_name": "Rectangle_Tool"
@@ -40,11 +36,14 @@
       }
     },
     {
+      "tool": "press_escape",
+      "params": {}
+    },
+    {
       "tool": "connect_shapes",
       "params": {
         "source_id": "Source",
-        "target_id": "Target",
-        "source_anchor": "auto"
+        "target_id": "Target"
       }
     }
   ]

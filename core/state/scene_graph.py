@@ -65,8 +65,14 @@ SCENE_GRAPH_VERSION = 1
 # ===========================================================================
 
 def _scene_path() -> str:
-    state_dir = config.raw().get("paths", {}).get("state_dir", "state")
-    return os.path.join(state_dir, "scene_graph.json")
+    """Absolute path of the live scene graph, under the dedicated
+    (gitignored) ``scene_graph/`` folder — see ``config.scene_graph_dir``."""
+    return os.path.join(config.scene_graph_dir(), "scene_graph.json")
+
+
+def scene_path() -> str:
+    """Public accessor for the scene-graph file path (used by notebooks/UI)."""
+    return _scene_path()
 
 
 def empty_graph() -> Dict[str, Any]:

@@ -106,6 +106,7 @@ def load_tool_definition(defn: Dict[str, Any]) -> ToolNode:
     params = defn.get("params", [])
     needs_ui_graph = defn.get("needs_ui_graph", True)
     description = defn.get("description", "")
+    param_specs = defn.get("param_specs", {})
 
     if "python_fn" in defn:
         # ── Python-backed L1 tool ─────────────────────────────────────
@@ -117,6 +118,7 @@ def load_tool_definition(defn: Dict[str, Any]) -> ToolNode:
             params=params, needs_ui_graph=needs_ui_graph,
             description=description,
             children=children,
+            param_specs=param_specs,
         )
 
     elif "steps" in defn:
@@ -135,6 +137,7 @@ def load_tool_definition(defn: Dict[str, Any]) -> ToolNode:
             params=params, needs_ui_graph=needs_ui_graph,
             description=description,
             children=children,
+            param_specs=param_specs,
         )
         node_ref[0] = node
 

@@ -7,7 +7,7 @@ Agentic AI for closed UIs — domain-portable framework with a persistent symbol
 ```
 Perception Pipeline:
   Screenshot → OpenCV detect → VLM label → state/ui_graph.json
-  + per-shape handle detection (resize / extend / rotate) → state/scene_graph.json
+  + per-shape handle detection (resize / extend / rotate) → scene_graph/scene_graph.json
 
 Operation Pipeline:
   User Task → Executor agent (picks tool from catalog)
@@ -17,7 +17,7 @@ Operation Pipeline:
             → L0 atom      → atom_* helper → pyautogui
                                ↑
                state/ui_graph.json   (calibrated coordinates)
-               state/scene_graph.json (live canvas objects + edges)
+               scene_graph/scene_graph.json (live canvas objects + edges, gitignored)
 ```
 
 The Executor agent **never sees pixel coordinates** — it picks named tools and references canvas objects by id (`obj_001`, `edge_001`). The framework resolves names to coordinates deterministically. The Executor can also run in a **text-only mode** with the screenshot dropped from the user message (the SCENE GRAPH alone drives planning) — see [Executor inference modes](#executor-inference-modes--screenshot--sg-vs-text-only) below.
@@ -132,6 +132,100 @@ Both modes share the same catalog, decision procedure, scene-graph block, and ac
 
 The framework still takes its **own** screenshots internally for handle detection (`_scan_and_reconcile` after geometry-changing ops). That's about keeping the SCENE GRAPH accurate; it is independent of what the LLM sees.
 
+## Planner — text prompt → full plan in ONE call
+
+The **Executor** picks one tool per turn (N LLM calls per task). The **Planner** (`core/agents/planner.py`) is the orchestrator-style alternative: it reads the task + SCENE GRAPH and emits the **whole ordered sequence of parameterized tool calls in a single LLM call**, which the framework then runs deterministically with zero further inference. This is the "prompt → draft graph" step from [ORCHESTRATOR.md](ORCHESTRATOR.md), scoped to a linear plan for Phase 1.
+
+```python
+from core import config
+from core.state import scene_graph as sg
+from core.orchestrator import plan_and_run, run_plan, plan_succeeded, trace_to_steps
+from core.agents.planner import plan
+
+g = config.ui_graph(); g["scene_graph"] = sg.load()
+
+# One-shot: plan with the LLM, then execute deterministically.
+out = plan_and_run("Place two rectangles Source and Target and connect them", g)
+print(out["ok"], [s["tool"] for s in out["plan"]["steps"]])
+
+# Or split the two halves (inspect / edit the plan before running):
+p = plan("Draw a 3-node flowchart A→B→C", g)        # text-only by default
+trace = run_plan(p["steps"], g, dry_run=True)        # dry_run = no mouse
+if plan_succeeded(trace):
+    # the trace is save-ready — persist it as a reusable compound tool
+    from core.tools.save_tool import save_trace_as_tool
+    save_trace_as_tool("flow_abc", steps=trace_to_steps(trace), trace=trace,
+                       description="A→B→C flow", overwrite=True)
+```
+
+### Typed, parameterizable tools
+
+So the Planner can fill the param space from the SCENE GRAPH, every tool param now carries a **type + description** (`core/tools/param_specs.py`):
+
+| type | how the Planner fills it |
+|---|---|
+| `tool_name` | one of the listed **sidebar shapes** |
+| `scene_object` | an existing `obj_NNN` id, or the **label** of an object the plan creates earlier (resolved → id at run time) |
+| `scene_edge` | an `edge_NNN` id (edges numbered in creation order) |
+| `direction` / `anchor` | fixed enum (`n/s/e/w[/…]`, `auto`) |
+| `int` / `string` / `keys` | literal value |
+
+Specs come from a central map keyed by canonical param name (so consistently-named params are typed everywhere for free); a tool's JSON may add an optional `"param_specs"` override. The Planner renders the catalog as `tool(name:type∈{enum}, …)`.
+
+### Plan == compound tool
+
+A plan's `steps` use the same `{tool, params}` schema as an L2 compound, so a successful plan saves straight back into `state/tools/` via `save_trace_as_tool` and becomes a first-class catalog tool.
+
+### Checkpoints (Phase 2) — verify against the scene graph
+
+Any step may carry a **checkpoint**: a screenshot taken after the step plus a set of **structural assertions** evaluated against the live scene graph — deterministically, with no LLM. This is the cheap verification the orchestrator is built around (`core/checkpoint.py`).
+
+```jsonc
+{ "tool": "place_and_label",
+  "params": { "tool_name": "Rectangle_Tool", "label": "Source" },
+  "checkpoint": {
+    "description": "Source placed",
+    "assert": [ { "check": "object_exists", "label": "Source" } ]
+  } }
+```
+
+Assertion kinds: `objects_count` / `edges_count` (with `op` ∈ `== != >= <= > <`), `object_exists` (by `label` or `id`), `edge_exists` (`source`/`target` as labels or ids; direction-tolerant unless `directed:true`), `selected`, `last_op`. The Planner emits checkpoints at milestones automatically; the user can add/edit them. `run_plan` records each result (`passed` + per-assertion `detail` + screenshot filename) on the trace; `checkpoints_passed(trace)` summarizes. Set `stop_on_checkpoint_fail=True` to halt on the first failure (the seam for the Phase-3 repair loop).
+
+### Repair (Phase 3) — fix a plan that drifted
+
+When a checkpoint fails (or the result just looks wrong), you fix it two ways:
+
+- **Manually** — edit the plan in place: change a step's tool, edit its params, reorder, add/remove steps, drop a checkpoint, then re-run.
+- **Ask the agent** — flag the wrong step(s), add a free-text note, and `planner.repair(task, ui_graph, failed_steps, user_note)` produces a **corrective plan from the CURRENT scene graph** (the real, post-execution state — so it continues from where things actually are rather than re-doing finished work). It reuses the full planner prompt (catalog, quirks, checkpoints) plus a failure-context message. Exposed as `POST /api/repair`; the returned plan is reviewed and run like any other.
+
+### Scene-graph lifecycle
+
+Live scene-graph state lives in its own gitignored folder, `scene_graph/scene_graph.json`, resolved against the project root so notebooks, CLI, and API all share one graph. It is **not** auto-reset: the Studio asks before a run whether to **clear or keep** an existing scene graph, and `POST /api/scene-graph/reset` / `sg.reset()` clear it on demand.
+
+### Studio — the Plan tab
+
+The frontend ([frontend/](frontend/)) has a **Plan** tab wrapping all of the above as a **persistent planning chat**:
+
+- **Chat** a task, then keep chatting to refine it ("make the boxes bigger", "add a third node and connect it"). The model re-emits the full plan each turn (`POST /api/plan/chat`); its reasoning is the reply. The thread is long-lived — any later message modifies the current plan.
+- **Edit** the draft plan by hand — change a step's tool, edit params, reorder, add/remove, drop a checkpoint.
+- **Run** it (with a clear-or-keep scene-graph prompt; *Clear* wipes the draw.io canvas too) → per-step status, checkpoint pass/fail badges, the resulting scene-graph summary, and the screenshot captured at each checkpoint (click to enlarge).
+- **Fix**: flag wrong steps + a note → **Ask agent to fix** re-plans from the current canvas (and threads the fix back into the chat).
+- **Save** the current plan as a reusable compound tool, straight into the catalog.
+
+Backed by `POST /api/plan/chat`, `POST /api/run-plan`, `POST /api/repair`, `POST /api/tools`, and `GET /api/screenshot/{name}` in [core/api.py](core/api.py).
+
+```bash
+# Offline (no LLM, no GUI):
+python tests/test_planner.py --prompt-only     # render the Planner system prompt
+python tests/test_planner.py --parse-demo       # parse a sample model reply → plan
+python tests/test_planner.py --dry-run          # walk a sample plan, no mouse
+python tests/test_checkpoint.py                 # checkpoint DSL + run_plan integration
+
+# Live (needs ollama + draw.io focused; 5s countdown to switch):
+python tests/test_planner.py --live "Place two rectangles Source and Target and connect them"
+python tests/test_planner.py --live "..." --screenshot   # screenshot+SG instead of text-only
+```
+
 ## Project structure
 
 ```
@@ -142,8 +236,11 @@ core/                        ← Framework — domain-agnostic
   capture.py                 ← Screenshot capture
   config.py                  ← Loads config.json + state/ui_graph.json
   pipeline.py                ← Agentic control loop (perceive → reason → act)
+  orchestrator.py            ← Deterministic plan runner (run_plan / plan_and_run)
+  checkpoint.py              ← Structural assertions over scene_graph (checkpoint DSL)
   agents/
-    executor.py              ← LLM tool selection (no coords)
+    executor.py              ← LLM tool selection, one per turn (no coords)
+    planner.py               ← LLM emits a FULL parameterized plan in one call
   perception/
     detect.py                ← OpenCV element detection + annotation
     label.py                 ← VLM crop labeling
@@ -153,6 +250,7 @@ core/                        ← Framework — domain-agnostic
     scene_graph.py           ← Live canvas objects + edges (deterministic)
   tools/
     registry.py              ← ToolNode dataclass, register(), dispatch()
+    param_specs.py           ← Typed param specs (type/description/enum) for the Planner
     primitives.py            ← L0 atom ToolNodes + raw atom_* helpers (pyautogui)
     actions.py               ← L1 generic action implementations (no registration)
     loader.py                ← JSON tool loader + compound executor builder
@@ -166,11 +264,13 @@ domains/                     ← Interface-specific plugins (swap to port)
 
 state/
   ui_graph.json              ← Calibrated sidebar UI graph (perception)
-  scene_graph.json           ← Live canvas state (objects + edges)
   tools/                     ← JSON tool definitions (all L1 and L2 tools)
     click_empty_canvas.json  ← ... 25 files total
     place_and_label.json
     ...
+
+scene_graph/                 ← Live canvas state (gitignored, per-session)
+  scene_graph.json           ← Current objects + edges; cleared on demand
 
 notebooks/
   scene_graph_demo.ipynb         ← End-to-end demo: deterministic + LLM-driven
@@ -286,7 +386,7 @@ python main.py --task "Draw a rectangle labelled Cache" --dry-run
 |------|-------|---------|
 | `config.json` | Manual | Domain selection, paths, models, executor + perception params |
 | `state/ui_graph.json` | Perception | Auto-detected sidebar element positions and labels |
-| `state/scene_graph.json` | Framework | Live canvas objects + edges, updated after each geometry-changing op |
+| `scene_graph/scene_graph.json` | Framework | Live canvas objects + edges (gitignored, per-session); cleared on demand from the Studio or `sg.reset()` |
 | `state/tools/*.json` | Framework / LLM | Registered L1 and L2 tool definitions |
 
 ---
@@ -349,5 +449,5 @@ save_trace_as_tool(
 | Issue | Root cause | Fix |
 |---|---|---|
 | Uppercase letters drop during `type_label` | `pyautogui.typewrite` doesn't handle Shift; "Database" types as "atabase" | Replace with `pyautogui.write()` |
-| `edit_label` / `delete_node` / `move_and_deselect` always fail | `Canvas_Nodes` is never populated — no canvas perception | Implement Perceiver agent (Phase 1) |
+| ~~`edit_label` / `delete_node` / `move_and_deselect` always fail~~ **(fixed)** | They resolved node refs via the empty `Canvas_Nodes` | Node refs now resolve by **id or label via the scene graph** (`_resolve_node_geom` in [actions.py](core/tools/actions.py)) |
 | Sidebar label ambiguity (`Rectangle_Tool_1..6`) | VLM labels small crops without group context | Group-aware detection (Phase 3) |

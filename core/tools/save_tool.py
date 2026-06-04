@@ -249,6 +249,20 @@ def save_trace_as_tool(
         logger.info("  Sanitized %d steps → %d steps",
                     len(steps), len(clean_steps))
 
+    # ── Reject self-reference ─────────────────────────────────────────
+    # A compound that lists itself as a step recurses forever at dispatch
+    # and makes its auto-computed level grow on every reload. This guard is
+    # checked BEFORE the file is written, so a bad trace (e.g. one where the
+    # LLM happened to call this very tool) can never overwrite a known-good
+    # definition already on disk.
+    self_refs = [i for i, s in enumerate(clean_steps) if s.get("tool") == name]
+    if self_refs:
+        raise ValueError(
+            f"Refusing to save tool '{name}': step index {self_refs} call the "
+            f"tool being defined, which would recurse infinitely when "
+            f"dispatched. Remove the self-referential step(s) from the trace."
+        )
+
     defn: Dict[str, Any] = {
         "name": name,
         "description": description,

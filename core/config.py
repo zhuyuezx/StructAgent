@@ -150,6 +150,18 @@ def state_dir() -> str:
     return d
 
 
+def scene_graph_dir() -> str:
+    """Dedicated, gitignored folder for live scene-graph state.
+
+    Always resolved against the project root (not the cwd), so notebooks,
+    the CLI, and the API all read/write the *same* scene graph instead of
+    each spawning a cwd-relative ``state/scene_graph.json``.
+    """
+    d = os.path.join(_PROJECT_ROOT, _cfg["paths"].get("scene_graph_dir", "scene_graph"))
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
 def ui_graph_path() -> str:
     return os.path.join(state_dir(), _cfg["paths"].get("ui_graph_file", "ui_graph.json"))
 

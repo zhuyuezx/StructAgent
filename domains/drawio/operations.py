@@ -39,6 +39,73 @@ _RESIZE_DIRECTION_VECTOR: Dict[str, tuple] = {
 }
 _EXTEND_OFFSET_PX = 140
 
+# Accept human / LLM phrasings for directions and normalize to canonical
+# compass codes. The Executor and Planner are told to use n/s/e/w, but local
+# models occasionally emit "east", "left", "up". Widening what the operands
+# accept makes them robust to that without changing the documented contract.
+_DIRECTION_ALIASES: Dict[str, str] = {
+    "n": "n", "s": "s", "e": "e", "w": "w",
+    "ne": "ne", "nw": "nw", "se": "se", "sw": "sw",
+    "north": "n", "south": "s", "east": "e", "west": "w",
+    "up": "n", "down": "s", "right": "e", "left": "w",
+    "northeast": "ne", "northwest": "nw", "southeast": "se", "southwest": "sw",
+    "top": "n", "bottom": "s",
+}
+
+
+def _norm_dir(direction: str) -> str:
+    """Normalize a direction/anchor to a canonical compass code.
+
+    Unknown values pass through (lower-cased/stripped) so each caller's own
+    validation still raises a clear 'unknown direction' error.
+    """
+    key = str(direction).lower().strip()
+    return _DIRECTION_ALIASES.get(key, key)
+
+
+def _active_object(sg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Return the object an operand should act on.
+
+    Prefer the currently-selected object; otherwise fall back to the most
+    recently created object that has a known bbox. The fallback exists because
+    several common flows clear the selection — e.g. ``place_and_label`` ends
+    with ``click_empty_canvas`` — yet the next step (``move_shape`` /
+    ``resize_shape`` / …) means "the shape I just created". Returns None only
+    when no object has a bbox yet.
+    """
+    sel = _sg.get_selected(sg)
+    if sel and sel.get("bbox"):
+        return sel
+    return next((o for o in reversed(sg["objects"]) if o.get("bbox")), None)
+
+
+def _reselect_if_needed(ui_graph: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Physically re-select a shape so on-screen handle detection works.
+
+    Handle-based operands (resize/rotate/extend) read the selection chrome of
+    the *currently selected* shape. If nothing is selected (e.g. after a
+    deselecting compound), click the recovered object's center to re-select it
+    on the canvas, then mark it selected in the scene graph. No-op when a shape
+    with a known bbox is already selected. Returns the active object or None.
+    """
+    sg = get_scene(ui_graph)
+    sel = _sg.get_selected(sg)
+    if sel and sel.get("bbox"):
+        return sel
+    target = _active_object(sg)
+    if target is None:
+        return None
+    bx, by, bw, bh = target["bbox"]
+    cx, cy = bx + bw // 2, by + bh // 2
+    logger.info("  [L1] re-selecting %s (no live selection)", target["id"])
+    atom_press("Escape")
+    time.sleep(0.2)
+    atom_click_at(cx, cy)
+    time.sleep(0.3)
+    _sg.set_selected(sg, target["id"])
+    save_scene(ui_graph)
+    return target
+
 
 # ===========================================================================
 # draw.io L1 operand implementations
@@ -108,11 +175,12 @@ def _fn_scan_handles(ui_graph: Dict[str, Any]) -> dict:
 def _fn_resize_shape(
     ui_graph: Dict[str, Any], direction: str, amount: int,
 ) -> dict:
-    direction = direction.lower().strip()
+    direction = _norm_dir(direction)
     if direction not in _RESIZE_HANDLE_FOR_DIRECTION:
         return {"status": "error", "tool": "resize_shape",
                 "error": f"unknown direction '{direction}'"}
     sync_current_bbox(ui_graph)
+    _reselect_if_needed(ui_graph)
     h = ensure_handles(ui_graph)
     if not h or not h.get("resize"):
         return {"status": "error", "tool": "resize_shape",
@@ -143,11 +211,12 @@ def _fn_resize_shape(
 
 
 def _fn_extend_shape(ui_graph: Dict[str, Any], direction: str) -> dict:
-    direction = direction.lower().strip()
+    direction = _norm_dir(direction)
     if direction not in ("n", "s", "e", "w"):
         return {"status": "error", "tool": "extend_shape",
                 "error": f"unknown direction '{direction}'"}
     sync_current_bbox(ui_graph)
+    _reselect_if_needed(ui_graph)
     h = ensure_handles(ui_graph)
     if not h or not h.get("extend"):
         return {"status": "error", "tool": "extend_shape",
@@ -189,6 +258,7 @@ def _fn_extend_shape(ui_graph: Dict[str, Any], direction: str) -> dict:
 
 def _fn_rotate_shape(ui_graph: Dict[str, Any], angle_degrees: float) -> dict:
     sync_current_bbox(ui_graph)
+    _reselect_if_needed(ui_graph)
     h = ensure_handles(ui_graph)
     if not h or not h.get("rotate") or not h.get("shape_bbox"):
         return {"status": "error", "tool": "rotate_shape",
@@ -223,16 +293,22 @@ def _fn_move_shape(
     ui_graph: Dict[str, Any], direction: str, amount: int,
 ) -> dict:
     """Move the selected shape; escape+reclicks to guarantee select mode."""
-    direction = direction.lower().strip()
+    direction = _norm_dir(direction)
     if direction not in _RESIZE_DIRECTION_VECTOR:
         return {"status": "error", "tool": "move_shape",
                 "error": f"unknown direction '{direction}'"}
     sync_current_bbox(ui_graph)
     sg = get_scene(ui_graph)
-    sel = _sg.get_selected(sg)
+    # Use the selected object, or recover the last-created bbox'd object when
+    # the selection was cleared (e.g. by place_and_label's click_empty_canvas).
+    # move_shape re-clicks the shape's center below, so this physically
+    # re-selects it before the drag.
+    sel = _active_object(sg)
     if not sel or not sel.get("bbox"):
         return {"status": "error", "tool": "move_shape",
-                "error": "no selected scene_graph object with a known bbox"}
+                "error": "no scene_graph object with a known bbox to move — "
+                         "place or select a shape first"}
+    _sg.set_selected(sg, sel["id"])
     target_id = sel["id"]
     bx, by, bw, bh = sel["bbox"]
     gx, gy = bx + bw // 2, by + bh // 2
@@ -327,6 +403,8 @@ def _fn_connect_shapes(
     # Auto-anchor: pick the source edge whose outward direction best
     # aligns with the source→target vector.  If the horizontal distance
     # dominates, use east/west; otherwise north/south.
+    if source_anchor != "auto":
+        source_anchor = _norm_dir(source_anchor)
     if source_anchor == "auto":
         if abs(tgt_cx - src_cx) >= abs(tgt_cy - src_cy):
             source_anchor = "e" if tgt_cx > src_cx else "w"

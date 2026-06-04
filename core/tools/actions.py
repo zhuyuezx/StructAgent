@@ -27,6 +27,50 @@ logger = logging.getLogger(__name__)
 
 
 # ===========================================================================
+# Node reference resolution
+# ===========================================================================
+
+def _resolve_node_geom(ui_graph: Dict[str, Any], ref: str) -> Dict[str, int]:
+    """Resolve a node reference (id OR label) to canvas geometry.
+
+    Looks up the calibrated ``Canvas_Nodes`` first (legacy perception), then
+    the **live scene graph** by object id or label, using the object's bbox
+    (center + size). This is why ``move_and_deselect`` / ``drag_node`` /
+    ``resize_node`` can reference ``obj_001`` *or* its label (e.g. ``"R1"``):
+    the scene graph is the source of truth now that ``Canvas_Nodes`` stays
+    empty. Raises ``KeyError`` listing the scene objects if nothing matches.
+
+    Returns ``{"x", "y", "w", "h"}`` where (x, y) is the node center.
+    """
+    try:
+        node = resolve_node(ui_graph, ref)
+        return {"x": node["x"], "y": node["y"],
+                "w": node.get("w", 120), "h": node.get("h", 60)}
+    except KeyError:
+        pass
+
+    sg = get_scene(ui_graph)
+    obj = _sg.find_by_id(sg, ref)
+    if obj is None:
+        obj = next((o for o in sg["objects"] if o.get("label") == ref), None)
+    if obj is not None and obj.get("bbox"):
+        bx, by, bw, bh = obj["bbox"]
+        return {"x": bx + bw // 2, "y": by + bh // 2, "w": bw, "h": bh}
+
+    avail = [(o.get("id"), o.get("label")) for o in sg.get("objects", [])]
+    raise KeyError(
+        f"Node '{ref}' not found in Canvas_Nodes or scene graph. "
+        f"Scene objects (id, label): {avail}"
+    )
+
+
+def _resolve_node_xy(ui_graph: Dict[str, Any], ref: str) -> tuple:
+    """Resolve a node reference to its center ``(x, y)``. See _resolve_node_geom."""
+    g = _resolve_node_geom(ui_graph, ref)
+    return g["x"], g["y"]
+
+
+# ===========================================================================
 # Click actions
 # ===========================================================================
 
@@ -47,22 +91,7 @@ def _fn_click_node(
     ui_graph: Dict[str, Any], node_ref: str, clicks: int = 1,
 ) -> dict:
     """Click a canvas node by id or label (resolves via ui_graph or scene_graph)."""
-    try:
-        node = resolve_node(ui_graph, node_ref)
-        x, y = node["x"], node["y"]
-    except KeyError:
-        sg = get_scene(ui_graph)
-        obj = _sg.find_by_id(sg, node_ref)
-        if obj is None:
-            for o in sg["objects"]:
-                if o.get("label") == node_ref:
-                    obj = o
-                    break
-        if obj is None or not obj.get("bbox"):
-            raise
-        bx, by, bw, bh = obj["bbox"]
-        x, y = bx + bw // 2, by + bh // 2
-
+    x, y = _resolve_node_xy(ui_graph, node_ref)
     logger.info("  [L1] click_node('%s', clicks=%d) → (%d, %d)", node_ref, clicks, x, y)
     atom_click_at(x, y, clicks=clicks)
     time.sleep(0.4)
@@ -84,9 +113,8 @@ def _fn_double_click_node(ui_graph: Dict[str, Any], node_ref: str) -> dict:
 def _fn_drag_node(
     ui_graph: Dict[str, Any], node_ref: str, target_x: int, target_y: int,
 ) -> dict:
-    """Drag a calibrated canvas node by id to (target_x, target_y)."""
-    node = resolve_node(ui_graph, node_ref)
-    sx, sy = node["x"], node["y"]
+    """Drag a canvas node (by id or label) to (target_x, target_y)."""
+    sx, sy = _resolve_node_xy(ui_graph, node_ref)
     logger.info("  [L1] drag_node('%s') → (%d,%d) → (%d,%d)", node_ref, sx, sy, target_x, target_y)
     atom_drag(sx, sy, target_x, target_y)
     return {"status": "ok", "tool": "drag_node", "node_ref": node_ref,
@@ -98,19 +126,16 @@ def _fn_drag_node_near(
     offset_x: int = 200, offset_y: int = 0,
 ) -> dict:
     """Drag *node_ref* to a position relative to *reference_node*."""
-    ref = resolve_node(ui_graph, reference_node)
-    return _fn_drag_node(
-        ui_graph, node_ref, ref["x"] + offset_x, ref["y"] + offset_y,
-    )
+    rx, ry = _resolve_node_xy(ui_graph, reference_node)
+    return _fn_drag_node(ui_graph, node_ref, rx + offset_x, ry + offset_y)
 
 
 def _fn_resize_node(
     ui_graph: Dict[str, Any], node_ref: str, new_width: int, new_height: int,
 ) -> dict:
-    """Resize a calibrated canvas node by dragging its handle."""
-    node = resolve_node(ui_graph, node_ref)
-    x, y = node["x"], node["y"]
-    w, h = node.get("w", 120), node.get("h", 60)
+    """Resize a canvas node (by id or label) by dragging its handle."""
+    geom = _resolve_node_geom(ui_graph, node_ref)
+    x, y, w, h = geom["x"], geom["y"], geom["w"], geom["h"]
     handle_x, handle_y = x + w // 2, y + h // 2
     new_hx, new_hy = x + new_width // 2, y + new_height // 2
     logger.info("  [L1] resize_node('%s', %d×%d)", node_ref, new_width, new_height)

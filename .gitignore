@@ -4,3 +4,12 @@ logs/
 __pycache__/
 .env
 *.pyc
+
+# live scene-graph state (runtime, per-session)
+scene_graph/
+
+# frontend build artifacts
+frontend/dist/
+*.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/vite.config.js
