@@ -176,20 +176,25 @@ Specs come from a central map keyed by canonical param name (so consistently-nam
 
 A plan's `steps` use the same `{tool, params}` schema as an L2 compound, so a successful plan saves straight back into `state/tools/` via `save_trace_as_tool` and becomes a first-class catalog tool.
 
-### Checkpoints (Phase 2) — verify against the scene graph
+### Checkpoints — verify from the screenshot, pause until it passes
 
-Any step may carry a **checkpoint**: a screenshot taken after the step plus a set of **structural assertions** evaluated against the live scene graph — deterministically, with no LLM. This is the cheap verification the orchestrator is built around (`core/checkpoint.py`).
+Any step may carry a **checkpoint**: the run **pauses** there, captures a screenshot, and waits for **verification** before continuing. Only a PASS resumes the plan. Verification is done one of two ways:
+
+- **Manual** (default) — you eyeball the screenshot in the Studio and click *Looks right — continue* or *Wrong — stop*.
+- **AI** (tick "Let AI verify checkpoints") — a **vision critic** (`core/agents/critic.py`, an image-capable model) judges the screenshot against the checkpoint's natural-language `description` and returns `{passed, reasoning}`.
 
 ```jsonc
 { "tool": "place_and_label",
   "params": { "tool_name": "Rectangle_Tool", "label": "Source" },
   "checkpoint": {
-    "description": "Source placed",
-    "assert": [ { "check": "object_exists", "label": "Source" } ]
+    "description": "A rectangle labelled 'Source' is on the canvas",
+    "assert": [ { "check": "object_exists", "label": "Source" } ]  // optional, secondary
   } }
 ```
 
-Assertion kinds: `objects_count` / `edges_count` (with `op` ∈ `== != >= <= > <`), `object_exists` (by `label` or `id`), `edge_exists` (`source`/`target` as labels or ids; direction-tolerant unless `directed:true`), `selected`, `last_op`. The Planner emits checkpoints at milestones automatically; the user can add/edit them. `run_plan` records each result (`passed` + per-assertion `detail` + screenshot filename) on the trace; `checkpoints_passed(trace)` summarizes. Set `stop_on_checkpoint_fail=True` to halt on the first failure (the seam for the Phase-3 repair loop).
+**Why not gate on the scene graph?** The scene graph only reflects mutations the framework itself performed — the moment the live UI drifts from it (a drag that didn't land, a dialog that stole focus, a hand-edit) it silently lies. So the **screenshot is authoritative**. The structural `assert` kinds (`objects_count` / `edges_count` with `op` ∈ `== != >= <= > <`, `object_exists`, `edge_exists`, `selected`, `last_op`) are still evaluated by `core/checkpoint.py` and shown under each checkpoint as **secondary "structural hints (may be stale)"**, but they no longer decide pass/fail.
+
+Execution is **segmented**: the orchestrator runs `steps[start:]` up to and including the next checkpointed step, then returns so the caller can verify it (`orchestrator.run_segment` → `POST /api/run-plan/segment`; the critic is `POST /api/critic`). The older whole-plan `run_plan` / `POST /api/run-plan` (scene-graph-gated, `stop_on_checkpoint_fail`) is kept for notebooks/tests.
 
 ### Repair (Phase 3) — fix a plan that drifted
 
@@ -208,11 +213,13 @@ The frontend ([frontend/](frontend/)) has a **Plan** tab wrapping all of the abo
 
 - **Chat** a task, then keep chatting to refine it ("make the boxes bigger", "add a third node and connect it"). The model re-emits the full plan each turn (`POST /api/plan/chat`); its reasoning is the reply. The thread is long-lived — any later message modifies the current plan.
 - **Edit** the draft plan by hand — change a step's tool, edit params, reorder, add/remove, drop a checkpoint.
-- **Run** it (with a clear-or-keep scene-graph prompt; *Clear* wipes the draw.io canvas too) → per-step status, checkpoint pass/fail badges, the resulting scene-graph summary, and the screenshot captured at each checkpoint (click to enlarge).
+- **Run** it (with a clear-or-keep scene-graph prompt; *Clear* wipes the draw.io canvas too). The run **pauses at each checkpoint** with the captured screenshot and a verdict gate — approve/reject by hand, or tick **Let AI verify checkpoints** to have the vision critic decide. A rejected (or failed) step is flagged and feeds the repair loop.
 - **Fix**: flag wrong steps + a note → **Ask agent to fix** re-plans from the current canvas (and threads the fix back into the chat).
 - **Save** the current plan as a reusable compound tool, straight into the catalog.
 
-Backed by `POST /api/plan/chat`, `POST /api/run-plan`, `POST /api/repair`, `POST /api/tools`, and `GET /api/screenshot/{name}` in [core/api.py](core/api.py).
+The **left panel** also lists the **captured sidebar icons** — the shapes perception detected in draw.io, grouped by category, each name usable as a `place_shape` `tool_name` (`GET /api/ui-graph`).
+
+Backed by `POST /api/plan/chat`, `POST /api/run-plan/segment`, `POST /api/critic`, `POST /api/repair`, `POST /api/tools`, and `GET /api/screenshot/{name}` in [core/api.py](core/api.py).
 
 ```bash
 # Offline (no LLM, no GUI):
@@ -236,11 +243,13 @@ core/                        ← Framework — domain-agnostic
   capture.py                 ← Screenshot capture
   config.py                  ← Loads config.json + state/ui_graph.json
   pipeline.py                ← Agentic control loop (perceive → reason → act)
-  orchestrator.py            ← Deterministic plan runner (run_plan / plan_and_run)
-  checkpoint.py              ← Structural assertions over scene_graph (checkpoint DSL)
+  orchestrator.py            ← Plan runner: run_plan + run_segment (verification-gated)
+  checkpoint.py              ← Structural assertions over scene_graph (secondary hints)
   agents/
+    _common.py               ← Shared coordinate-free state rendering + JSON parsing
     executor.py              ← LLM tool selection, one per turn (no coords)
     planner.py               ← LLM emits a FULL parameterized plan in one call
+    critic.py                ← Vision critic: verify a checkpoint from its screenshot
   perception/
     detect.py                ← OpenCV element detection + annotation
     label.py                 ← VLM crop labeling

@@ -184,6 +184,115 @@ def run_plan(
     return trace
 
 
+def next_checkpoint_index(steps: List[Dict[str, Any]], start: int) -> int:
+    """Index of the first step at or after *start* carrying a ``checkpoint``.
+
+    Returns ``len(steps)`` if none — i.e. "run to the end".
+    """
+    for i in range(start, len(steps)):
+        if steps[i].get("checkpoint"):
+            return i
+    return len(steps)
+
+
+def run_segment(
+    steps: List[Dict[str, Any]],
+    start: int,
+    ui_graph: Optional[Dict[str, Any]] = None,
+    *,
+    capture_checkpoints: bool = True,
+    screenshot_fn: Optional[ScreenshotFn] = None,
+    step_cooldown: Optional[float] = None,
+    on_step: Optional[StepCallback] = None,
+) -> Dict[str, Any]:
+    """Run ``steps[start:]`` up to AND INCLUDING the next checkpointed step.
+
+    This is the verification-gated counterpart to :func:`run_plan`: instead of
+    deciding pass/fail from the scene graph inline, it *pauses* at each
+    checkpoint so the caller can verify the captured screenshot (manually or via
+    :mod:`core.agents.critic`) before resuming. The scene-graph assertions are
+    still evaluated and attached for context, but they no longer gate the run —
+    the screenshot is authoritative (see ORCHESTRATOR.md / critic.py).
+
+    Returns
+    -------
+    ``{"trace", "next_index", "done", "checkpoint_step"}``:
+      - ``trace``: the entries produced in THIS segment (same shape as
+        :func:`run_plan`).
+      - ``next_index``: where to resume (``stop + 1``); equals ``len(steps)``
+        when the plan is finished.
+      - ``done``: ``next_index >= len(steps)``.
+      - ``checkpoint_step``: 1-based step number that paused the run (the last
+        step of the segment, if it had a checkpoint), else ``None``.
+
+    Execution stops early at the first dispatch error (like ``run_plan`` with
+    ``stop_on_error=True``); ``next_index`` then points past the failed step.
+    """
+    graph = ui_graph if ui_graph is not None else config.ui_graph()
+    cooldown = config.step_cooldown() if step_cooldown is None else step_cooldown
+
+    stop = next_checkpoint_index(steps, start)  # inclusive end of this segment
+    trace: List[Dict[str, Any]] = []
+    checkpoint_step: Optional[int] = None
+    resume = min(stop + 1, len(steps))
+
+    for i in range(start, min(stop + 1, len(steps))):
+        step = steps[i]
+        step_no = i + 1
+        tool = step.get("tool")
+        params = dict(step.get("params") or {})
+
+        if not tool:
+            result = {"status": "error", "error": "step missing 'tool'"}
+        elif tool not in TOOL_CATALOG:
+            result = {"status": "error", "tool": tool,
+                      "error": f"unknown tool '{tool}'"}
+        else:
+            result = dispatch(tool, params, ui_graph=graph)
+
+        entry: Dict[str, Any] = {"step": step_no, "tool": tool,
+                                 "params": params, "result": result}
+        logger.info("  segment step %d  %s  → %s", step_no, tool,
+                    result.get("status"))
+
+        ckpt = step.get("checkpoint")
+        if ckpt:
+            cp_result = _ckpt.evaluate(ckpt, graph.get("scene_graph") or {})
+            shot: Optional[str] = None
+            shot_err: Optional[str] = None
+            if capture_checkpoints and ckpt.get("screenshot", True):
+                cap = _capture_checkpoint_screenshot(step_no, screenshot_fn)
+                shot, shot_err = cap["path"], cap["error"]
+            cp_result["screenshot"] = shot
+            if shot_err:
+                cp_result["screenshot_error"] = shot_err
+            entry["checkpoint"] = cp_result
+            checkpoint_step = step_no
+            logger.info("    checkpoint (await verification): %s",
+                        _ckpt.summarize(cp_result))
+
+        trace.append(entry)
+        if on_step is not None:
+            on_step(entry)
+
+        if result.get("status") == "error":
+            logger.warning("run_segment: stop at step %d (%s): %s",
+                           step_no, tool, result.get("error"))
+            resume = i + 1
+            checkpoint_step = None  # error pre-empts the checkpoint pause
+            break
+
+        if cooldown:
+            time.sleep(cooldown)
+
+    return {
+        "trace": trace,
+        "next_index": resume,
+        "done": resume >= len(steps),
+        "checkpoint_step": checkpoint_step,
+    }
+
+
 def plan_succeeded(trace: List[Dict[str, Any]]) -> bool:
     """True if every step in *trace* dispatched cleanly (``ok`` or ``dry_run``).
 

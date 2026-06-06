@@ -263,6 +263,21 @@ def explorer_model() -> str:
     """Model for icon labeling (separate from planner model)."""
     return explorer.model
 
+# Critic
+def critic_model() -> str:
+    """Vision model for the checkpoint critic (Phase 3 verification).
+
+    The critic judges a checkpoint from a *screenshot*, so it must be an
+    image-capable model. Defaults to the explorer's icon-labeling vision model
+    (which is known to accept images); override with a ``"critic": {"model": …}``
+    block in config.json.
+    """
+    return _cfg.get("critic", {}).get("model", explorer.model)
+
+def critic_timeout() -> float:
+    """HTTP timeout (s) for a single critic verification call."""
+    return float(_cfg.get("critic", {}).get("timeout", 60))
+
 def label_timeout() -> float:
     return explorer.label_timeout
 

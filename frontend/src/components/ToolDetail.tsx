@@ -31,11 +31,20 @@ export function ToolDetail({ tool, onDelete, onCloneToComposer }: Props) {
               Edit in composer
             </button>
           )}
-          {tool.has_json && (
+          {/* Delete is offered only for L1+ tools — these are JSON-backed
+              (operands / compounds) and safe to remove. L0 atoms are Python
+              primitives with no file to delete. */}
+          {tool.level >= 1 && tool.has_json && (
             <button
               className="danger"
+              title={`Delete this L${tool.level} tool (removes its JSON from state/tools/)`}
               onClick={() => {
-                if (confirm(`Delete tool "${tool.name}"?`)) onDelete(tool.name);
+                if (
+                  confirm(
+                    `Delete L${tool.level} tool "${tool.name}"? This removes its definition from state/tools/.`,
+                  )
+                )
+                  onDelete(tool.name);
               }}
             >
               Delete

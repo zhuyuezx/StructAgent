@@ -43,5 +43,9 @@
     "nms_distance": 20,
     "label_timeout": 30,
     "label_max_retries": 2
+  },
+  "critic": {
+    "model": "qwen3-vl:4b",
+    "timeout": 60
   }
 }

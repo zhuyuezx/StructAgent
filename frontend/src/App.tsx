@@ -7,6 +7,7 @@ import { SceneGraphView } from './components/SceneGraphView';
 import { ToolDetail } from './components/ToolDetail';
 import { ToolTree } from './components/ToolTree';
 import type {
+  CapturedIcon,
   SceneGraph,
   ToolDetail as Detail,
   ToolSummary,
@@ -16,6 +17,7 @@ type Tab = 'inspect' | 'execute' | 'compose' | 'plan';
 
 export default function App() {
   const [tools, setTools] = useState<ToolSummary[]>([]);
+  const [icons, setIcons] = useState<CapturedIcon[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [composerSeed, setComposerSeed] = useState<Detail | null>(null);
@@ -62,10 +64,31 @@ export default function App() {
     }
   }, []);
 
+  const reloadIcons = useCallback(async () => {
+    try {
+      const ui = await api.getUiGraph();
+      setIcons(ui.icons);
+    } catch (e) {
+      setGlobalError(String(e));
+    }
+  }, []);
+
+  // Collapse same-shape duplicate icons to one canonical icon per shape.
+  const dedupeIcons = useCallback(async () => {
+    try {
+      const ui = await api.dedupeIcons();
+      setIcons(ui.icons);
+      setGlobalError(null);
+    } catch (e) {
+      setGlobalError(String(e));
+    }
+  }, []);
+
   useEffect(() => {
     reloadTools();
     reloadSceneGraph();
-  }, [reloadTools, reloadSceneGraph]);
+    reloadIcons();
+  }, [reloadTools, reloadSceneGraph, reloadIcons]);
 
   // Fetch detail when selection changes.
   useEffect(() => {
@@ -146,9 +169,11 @@ export default function App() {
       <main className="app__main">
         <ToolTree
           tools={tools}
+          icons={icons}
           selected={selected}
           onSelect={setSelected}
           onReload={rescanTools}
+          onDedupeIcons={dedupeIcons}
         />
 
         <section className="app__content">

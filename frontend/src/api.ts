@@ -3,18 +3,23 @@
 
 import type {
   ChatPlanBody,
+  CriticBody,
+  CriticResult,
   PlanBody,
   PlanResult,
   RepairBody,
   RunBody,
   RunPlanBody,
   RunPlanResult,
+  RunPlanSegmentBody,
   RunResult,
   RunStepsBody,
   SaveToolBody,
   SceneGraph,
+  SegmentResult,
   ToolDetail,
   ToolSummary,
+  UiGraphResult,
 } from './types';
 
 const BASE = '/api';
@@ -74,8 +79,9 @@ export const api = {
   getSceneGraph: () => request<SceneGraph>('/scene-graph'),
   resetSceneGraph: () =>
     request<SceneGraph>('/scene-graph/reset', { method: 'POST' }),
-  getUiGraph: () =>
-    request<{ domain: string; sidebar_shapes: string[] }>('/ui-graph'),
+  getUiGraph: () => request<UiGraphResult>('/ui-graph'),
+  dedupeIcons: () =>
+    request<UiGraphResult>('/ui-graph/dedupe', { method: 'POST' }),
   // Planner + orchestrator (Phase 2)
   plan: (body: PlanBody) =>
     request<PlanResult>('/plan', { method: 'POST', body: JSON.stringify(body) }),
@@ -86,6 +92,16 @@ export const api = {
     }),
   runPlan: (body: RunPlanBody) =>
     request<RunPlanResult>('/run-plan', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  runPlanSegment: (body: RunPlanSegmentBody) =>
+    request<SegmentResult>('/run-plan/segment', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  critic: (body: CriticBody) =>
+    request<CriticResult>('/critic', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

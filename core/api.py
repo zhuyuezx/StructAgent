@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -42,6 +43,7 @@ from pydantic import BaseModel, Field
 from core import config
 from core import orchestrator
 from core.state import scene_graph as sg
+from core.state import ui_graph as ui_state
 from core.tools import TOOL_CATALOG, dispatch
 from core.tools.loader import _make_compound_executor, load_tools_from_dir
 from core.tools.registry import ALL_NODES
@@ -216,6 +218,50 @@ class RepairBody(BaseModel):
     countdown: int = 0
 
 
+class CapturedIcon(BaseModel):
+    name: str          # dispatch key (place_shape tool_name)
+    label: str         # humanized shape family
+    category: str      # group header (shape family)
+    x: int
+    y: int
+    w: int
+    h: int
+
+
+class UiGraphResult(BaseModel):
+    domain: str
+    sidebar_shapes: List[str]          # names only (back-compat)
+    icons: List[CapturedIcon]          # full per-icon metadata
+
+
+class RunPlanSegmentBody(BaseModel):
+    # The whole plan + where to resume; the server runs up to and including the
+    # next checkpointed step, then returns so the caller can verify it before
+    # continuing (manual or AI critic). clear_canvas/countdown apply at start=0.
+    steps: List[Dict[str, Any]]
+    start: int = 0
+    countdown: int = 0
+    clear_canvas: bool = False
+
+
+class SegmentResult(BaseModel):
+    trace: List[Dict[str, Any]]        # the steps run in THIS segment
+    next_index: int                    # resume here (== len(steps) when done)
+    done: bool                         # no more steps to run
+    checkpoint_step: Optional[int] = None  # 1-based step# that paused us, if any
+    scene_graph: Dict[str, Any]
+
+
+class CriticBody(BaseModel):
+    screenshot: str                    # filename under screenshots_dir
+    description: str                   # the checkpoint's expectation
+
+
+class CriticResult(BaseModel):
+    passed: bool
+    reasoning: str = ""
+
+
 # ===========================================================================
 # Helpers
 # ===========================================================================
@@ -277,6 +323,21 @@ def _countdown(seconds: int) -> None:
         time.sleep(1)
 
 
+def _optional_input_screenshot(
+    use_screenshot: bool, countdown: int, name: str,
+) -> Optional[str]:
+    """Countdown + capture an input screenshot when requested, else None.
+
+    Shared by the LLM endpoints (plan / plan-chat / repair) so screenshot+SG
+    mode behaves identically across them.
+    """
+    if not use_screenshot:
+        return None
+    _countdown(countdown)
+    from core.capture import screenshot as _screenshot
+    return _screenshot(name)
+
+
 # ===========================================================================
 # Tool catalog endpoints
 # ===========================================================================
@@ -292,6 +353,12 @@ def health() -> Dict[str, Any]:
 
 @app.get("/api/tools", response_model=List[ToolSummary])
 def list_tools() -> List[ToolSummary]:
+    # Reconcile with disk before answering so a browser refresh reflects
+    # tools added or removed out-of-band — e.g. a JSON file deleted directly
+    # in state/tools/. Without this, a plain GET returns the in-memory
+    # catalog, which can be stale relative to disk (and a deleted file would
+    # keep showing up until the server restarts).
+    _reload_tools_from_disk()
     return [_tool_to_summary(n) for n in TOOL_CATALOG]
 
 
@@ -347,6 +414,11 @@ def save_tool(body: SaveToolBody) -> ToolDetail:
         raise HTTPException(409, str(e))
     except Exception as e:
         raise HTTPException(400, f"save_trace_as_tool failed: {e}")
+    # Record it as a known JSON tool so the deletion-diff in
+    # _reload_tools_from_disk() can later drop it if its file is removed
+    # out-of-band. (save_trace_as_tool registers it in the catalog but does
+    # not touch this snapshot.)
+    _KNOWN_JSON_TOOLS.add(body.name)
     return _tool_to_detail(body.name)
 
 
@@ -365,6 +437,8 @@ def delete_tool(name: str) -> Dict[str, Any]:
             ALL_NODES.remove(node)
         except ValueError:
             pass
+    # Keep the deletion-diff snapshot consistent with disk.
+    _KNOWN_JSON_TOOLS.discard(name)
     return {"status": "ok", "deleted": name}
 
 
@@ -463,11 +537,8 @@ def plan(body: PlanBody) -> PlanResult:
     from core.agents.planner import plan as _plan
 
     _refresh_scene_graph()
-    shot: Optional[str] = None
-    if body.use_screenshot:
-        _countdown(body.countdown)
-        from core.capture import screenshot as _screenshot
-        shot = _screenshot("_plan_input.png")
+    shot = _optional_input_screenshot(
+        body.use_screenshot, body.countdown, "_plan_input.png")
     try:
         out = _plan(body.task, _G, screenshot_path=shot)
     except Exception as e:
@@ -488,11 +559,8 @@ def plan_chat(body: ChatPlanBody) -> PlanResult:
     if not body.messages or body.messages[-1].get("role") != "user":
         raise HTTPException(400, "messages must be non-empty and end with a user turn")
     _refresh_scene_graph()
-    shot: Optional[str] = None
-    if body.use_screenshot:
-        _countdown(body.countdown)
-        from core.capture import screenshot as _screenshot
-        shot = _screenshot("_plan_input.png")
+    shot = _optional_input_screenshot(
+        body.use_screenshot, body.countdown, "_plan_input.png")
     try:
         out = chat_plan(body.messages, _G, screenshot_path=shot)
     except Exception as e:
@@ -530,6 +598,61 @@ def run_plan(body: RunPlanBody) -> RunPlanResult:
     )
 
 
+@app.post("/api/run-plan/segment", response_model=SegmentResult)
+def run_plan_segment(body: RunPlanSegmentBody) -> SegmentResult:
+    """Run one verification-gated segment of a plan.
+
+    Executes ``steps[start:]`` up to and including the next checkpointed step,
+    captures that checkpoint's screenshot, and returns — so the caller can
+    verify it (manually or via POST /api/critic) before resuming from
+    ``next_index``. ``clear_canvas`` / ``countdown`` apply only at ``start==0``.
+
+    Unlike POST /api/run-plan, the scene-graph assertions do NOT gate the run;
+    the screenshot is the source of truth (see core/agents/critic.py).
+    """
+    if not body.steps:
+        raise HTTPException(400, "No steps to run.")
+    unknown = [s.get("tool") for s in body.steps
+               if s.get("tool") not in TOOL_CATALOG]
+    if unknown:
+        raise HTTPException(400, f"Unknown tool(s) in steps: {unknown}")
+    if body.start < 0 or body.start >= len(body.steps):
+        raise HTTPException(400, f"start {body.start} out of range "
+                                 f"[0, {len(body.steps)})")
+
+    _countdown(body.countdown)
+    if body.clear_canvas and body.start == 0:
+        _clear_canvas()          # draw.io is focused now (post-countdown)
+    _refresh_scene_graph()
+    seg = orchestrator.run_segment(body.steps, body.start, _G)
+    return SegmentResult(
+        trace=_basename_screenshots(seg["trace"]),
+        next_index=seg["next_index"],
+        done=seg["done"],
+        checkpoint_step=seg["checkpoint_step"],
+        scene_graph=_G["scene_graph"],
+    )
+
+
+@app.post("/api/critic", response_model=CriticResult)
+def critic(body: CriticBody) -> CriticResult:
+    """Have the vision critic judge a checkpoint screenshot against its
+    expectation. Returns ``{passed, reasoning}``; the caller only continues the
+    plan when ``passed`` is true. Imported lazily (needs ``ollama``)."""
+    from core.agents import critic as _critic
+
+    safe = os.path.basename(body.screenshot)
+    path = os.path.join(config.screenshots_dir(), safe)
+    if not os.path.isfile(path):
+        raise HTTPException(404, f"No screenshot '{safe}'")
+    try:
+        out = _critic.verify(path, body.description)
+    except Exception as e:
+        raise HTTPException(502, f"critic failed: {e}")
+    return CriticResult(passed=bool(out.get("passed")),
+                        reasoning=out.get("reasoning", ""))
+
+
 @app.post("/api/repair", response_model=PlanResult)
 def repair(body: RepairBody) -> PlanResult:
     """Produce a corrective plan from the current scene graph (Phase 3).
@@ -541,11 +664,8 @@ def repair(body: RepairBody) -> PlanResult:
     from core.agents.planner import repair as _repair
 
     _refresh_scene_graph()
-    shot: Optional[str] = None
-    if body.use_screenshot:
-        _countdown(body.countdown)
-        from core.capture import screenshot as _screenshot
-        shot = _screenshot("_repair_input.png")
+    shot = _optional_input_screenshot(
+        body.use_screenshot, body.countdown, "_repair_input.png")
     try:
         out = _repair(body.task, _G, failed_steps=body.failed_steps,
                       user_note=body.user_note, screenshot_path=shot)
@@ -582,11 +702,60 @@ def reset_scene_graph() -> Dict[str, Any]:
     return g
 
 
-@app.get("/api/ui-graph")
-def get_ui_graph() -> Dict[str, Any]:
-    """Return the calibrated sidebar elements (names only, coords stripped)."""
+_TOOL_SUFFIX_RE = re.compile(r"_Tool(?:_\d+)?$")
+
+
+def _icon_category(name: str) -> str:
+    """Derive a human-readable shape family from a captured icon's name.
+
+    The perception layer names icons ``<Shape>_Tool`` and disambiguates
+    duplicates with a numeric suffix (``Rectangle_Tool_1``). We strip both to
+    recover the family (``Rectangle``), then humanize underscores. This is the
+    only categorization the captured data actually supports — no hardcoded
+    taxonomy — so all variants of a shape group together.
+    """
+    base = _TOOL_SUFFIX_RE.sub("", name) or name
+    return base.replace("_", " ").strip() or "Other"
+
+
+@app.get("/api/ui-graph", response_model=UiGraphResult)
+def get_ui_graph() -> UiGraphResult:
+    """Return the captured sidebar icons with labels, categories, and geometry.
+
+    These are the shapes the perception layer detected + labeled in draw.io's
+    sidebar; each ``name`` is the dispatch key accepted by ``place_shape`` /
+    ``place_and_label`` (the ``tool_name`` param). The frontend lists them in
+    the left panel grouped by ``category``.
+    """
     elements = _G.get("UI_Elements", {})
-    return {
-        "domain": config.domain(),
-        "sidebar_shapes": sorted(elements.keys()),
-    }
+    icons: List[CapturedIcon] = []
+    for name in sorted(elements):
+        e = elements[name]
+        cat = _icon_category(name)
+        icons.append(CapturedIcon(
+            name=name,
+            label=cat,
+            category=cat,
+            x=e.get("x", 0), y=e.get("y", 0),
+            w=e.get("w", 0), h=e.get("h", 0),
+        ))
+    return UiGraphResult(
+        domain=config.domain(),
+        sidebar_shapes=[i.name for i in icons],
+        icons=icons,
+    )
+
+
+@app.post("/api/ui-graph/dedupe", response_model=UiGraphResult)
+def dedupe_ui_graph() -> UiGraphResult:
+    """Collapse the captured icons to one canonical icon per shape.
+
+    The vision labeler sometimes tags several distinct sidebar cells with the
+    same shape word (``Rectangle_Tool_1 … _6``). This keeps only the canonical
+    (top-left-most) icon of each shape, rewrites state/ui_graph.json, and
+    refreshes the live catalog so the change shows without a restart.
+    """
+    diff = ui_state.dedupe_ui_state()
+    logger.info("[api] deduped captured icons: %s", diff)
+    _G["UI_Elements"] = config.ui_graph().get("UI_Elements", {})
+    return get_ui_graph()

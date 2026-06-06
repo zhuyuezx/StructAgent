@@ -128,14 +128,23 @@ export interface AssertionResult {
   spec: Assertion;
 }
 
+// How a checkpoint was verified (Phase 3). The screenshot/critic/human verdict
+// is authoritative; `passed` (SG assertions) is kept only as a secondary hint.
+export interface CheckpointVerification {
+  mode: 'manual' | 'ai';
+  passed: boolean;
+  reasoning?: string; // critic's explanation (ai mode)
+}
+
 export interface CheckpointResult {
-  passed: boolean | null;
+  passed: boolean | null; // SG-assertion result — secondary hint, not the gate
   description: string;
   results?: AssertionResult[];
   screenshot?: string | null; // filename, served by GET /api/screenshot/{name}
   screenshot_error?: string;
   skipped?: boolean;
   reason?: string;
+  verification?: CheckpointVerification; // set by the client once decided
 }
 
 export interface TraceEntry {
@@ -167,4 +176,49 @@ export interface RunPlanResult {
   checkpoints_ok: boolean;
   trace: TraceEntry[];
   scene_graph: SceneGraph;
+}
+
+// === Captured icons (left panel) ==========================================
+
+export interface CapturedIcon {
+  name: string; // dispatch key for place_shape's tool_name
+  label: string; // humanized shape family
+  category: string; // group header
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface UiGraphResult {
+  domain: string;
+  sidebar_shapes: string[];
+  icons: CapturedIcon[];
+}
+
+// === Segmented, verification-gated run (Phase 3) ==========================
+
+export interface RunPlanSegmentBody {
+  steps: PlanStep[];
+  start: number;
+  countdown?: number;
+  clear_canvas?: boolean;
+}
+
+export interface SegmentResult {
+  trace: TraceEntry[];
+  next_index: number;
+  done: boolean;
+  checkpoint_step: number | null; // 1-based step# that paused us, if any
+  scene_graph: SceneGraph;
+}
+
+export interface CriticBody {
+  screenshot: string;
+  description: string;
+}
+
+export interface CriticResult {
+  passed: boolean;
+  reasoning: string;
 }

@@ -32,18 +32,19 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any, Dict, List, Optional
 
 import ollama
 
 from core import config
+from core.agents._common import (
+    active_selection_summary,
+    element_summary,
+    extract_json,
+)
 from core.state import scene_graph as _sg
 from core.tools import TOOL_CATALOG
 from core.tools.param_specs import format_param, spec_for
-# Reuse the executor's coordinate-free state renderers — same package, same
-# SCENE GRAPH / sidebar / active-selection blocks the executor already trusts.
-from core.agents.executor import _element_summary, _active_selection_summary
 
 logger = logging.getLogger(__name__)
 
@@ -112,11 +113,9 @@ You receive ONE view of the canvas:
 # draw.io behaviours the plan must account for. Kept local to the Planner so
 # the executor's prompt stays untouched; the wording mirrors it intentionally.
 _QUIRKS = """\
-- **`place_shape` always drops at the SAME default canvas position.** A second
-  `place_shape` with no move in between lands ON TOP of the first. To place N
-  free-standing shapes, after each placement `move_shape` it out of the drop
-  zone (e.g. ~160-200 px) before the next `place_shape`. This is the single
-  most common planning mistake.
+- **`place_shape` always drops at the SAME fixed point**, no matter where
+  earlier shapes ended up — position every shape yourself with distinct offsets
+  (see POSITIONING SHAPES). Equal direction+amount ⇒ shapes overlap: the #1 bug.
 - **`place_shape` auto-enters text-edit mode** on the new shape. Follow it with
   `type_label` then `press_escape`. Do NOT `double_click_node` a fresh shape.
 - **Selection is single-shape.** `connect_shapes` selects the source itself —
@@ -154,8 +153,26 @@ Rules:
   match — they make the plan shorter and more robust.
 
 # PLAN AS IF YOU WERE EXECUTING
-Simulate the canvas in your head as the steps run: track where each shape sits
-and which one is selected. Respect the drawio quirks below.
+Simulate the canvas as the steps run: track where each shape sits and which one
+is selected. Respect the drawio quirks below.
+
+# POSITIONING SHAPES
+Placement is *positionless* — every `place_shape` lands at the same fixed drop
+point — so YOU are responsible for where shapes end up:
+
+1. First assign each shape a target offset from the drop point: choose one
+   layout (line, grid, ring, …) and one fixed spacing. The offsets must be
+   pairwise DISTINCT and spread around the point.
+2. Then realize each shape — place it, then `move_shape` by its offset. The
+   move is measured from the drop point, NOT from other shapes, so the amount a
+   freshly-placed shape gets IS its offset. Reusing a direction+amount stacks
+   two shapes on top of each other.
+3. To space N items evenly along an axis, center them: item k sits at
+   `(k - (N-1)/2) * spacing` (negative = north / west).
+
+When shapes are CONNECTED, prefer `extend_shape(direction)` — it places the
+next shape already offset AND linked, so there are no coordinates to reason
+about at all.
 
 # CHECKPOINTS (attach at milestones — strongly recommended)
 After steps that produce a verifiable result (finished placing+labelling a
@@ -224,37 +241,15 @@ def build_prompt(ui_graph: Dict[str, Any], use_screenshot: bool = False) -> str:
         type_glossary=_param_type_glossary(),
         quirks_block=_QUIRKS,
         tool_table=_typed_tool_table(),
-        element_summary=_element_summary(ui_graph),
+        element_summary=element_summary(ui_graph),
         scene_graph_summary=_sg.summary_for_prompt(sg_data),
-        active_selection=_active_selection_summary(ui_graph),
+        active_selection=active_selection_summary(ui_graph),
     )
 
 
 # ---------------------------------------------------------------------------
 # Response parsing
 # ---------------------------------------------------------------------------
-
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
-
-
-def _extract_json(raw: str) -> Any:
-    """Pull a JSON value (object or array) from the LLM's raw text output."""
-    text = raw.strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = _JSON_BLOCK_RE.search(text)
-    if match:
-        return json.loads(match.group(1))
-    # First {...} or [...] — whichever appears first.
-    candidates = [(text.find("{"), text.rfind("}")), (text.find("["), text.rfind("]"))]
-    candidates = [(s, e) for s, e in candidates if s != -1 and e > s]
-    if candidates:
-        s, e = min(candidates, key=lambda c: c[0])
-        return json.loads(text[s:e + 1])
-    raise ValueError(f"Could not parse JSON from planner response:\n{raw}")
-
 
 def _normalize_step(step: Dict[str, Any]) -> Dict[str, Any]:
     """Coerce one raw step into ``{tool, params}`` (accepts 'action' alias)."""
@@ -279,7 +274,7 @@ def parse_plan_response(raw: str) -> Dict[str, Any]:
     Accepts any of: a top-level JSON array of steps, ``{"steps": [...]}``, or
     ``{"plan": [...]}``. Each step is normalized to ``{tool, params}``.
     """
-    data = _extract_json(raw)
+    data = extract_json(raw)
 
     if isinstance(data, list):
         steps_raw, reasoning = data, ""

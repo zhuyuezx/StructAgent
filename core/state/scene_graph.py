@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from core import config
 
@@ -259,7 +259,7 @@ def update_edge_label(
     graph: Dict[str, Any], edge_id: str, label: str,
     op_name: str = "",
 ) -> Optional[Dict[str, Any]]:
-    op_idx = _bump_op(graph, op_name or "update_edge_label")
+    _bump_op(graph, op_name or "update_edge_label")
     for e in graph["edges"]:
         if e["id"] == edge_id:
             e["label"] = label

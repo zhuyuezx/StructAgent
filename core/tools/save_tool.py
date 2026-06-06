@@ -35,7 +35,6 @@ from typing import Any, Dict, List, Optional
 
 from core import config
 from core.tools.loader import load_tool_definition
-from core.tools.registry import TOOL_CATALOG
 
 logger = logging.getLogger(__name__)
 

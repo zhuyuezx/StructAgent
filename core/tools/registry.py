@@ -124,7 +124,7 @@ def print_tree() -> None:
     print(f"\n  Leaf tools (L0): {len(leaves)}")
     for n in leaves:
         print(f"    {n.name}({', '.join(n.params)})")
-    print(f"\n  Compound tools:")
+    print("\n  Compound tools:")
     for n in compounds:
         print(f"\n{n.tree_str(indent=2)}")
 

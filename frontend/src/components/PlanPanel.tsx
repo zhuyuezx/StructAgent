@@ -4,8 +4,12 @@
 //     plan; every later message refines it ("make them bigger", "add a third").
 //     The model re-emits the full plan each turn; its reasoning is the reply.
 //   • Edit: the draft plan is editable by hand (tool, params, order, add/remove).
-//   • Run: execute it (optionally clearing the draw.io canvas first), with a
-//     checkpoint screenshot + pass/fail after each checkpointed step.
+//   • Run: execute it one SEGMENT at a time. The run pauses at every checkpoint,
+//     captures a screenshot, and waits for verification before continuing —
+//     either the user eyeballs the screenshot (manual, default) or, when "Let
+//     AI verify" is on, a vision critic judges it. Only a PASS resumes the plan.
+//     (Scene-graph assertions are shown as secondary hints, never the gate —
+//     the graph goes stale the moment the live UI drifts from it.)
 //   • Fix: flag wrong steps + a note → "Ask agent to fix" re-plans from the
 //     current canvas. (The fix is also threaded back into the chat.)
 //   • Save: persist the current plan as a reusable compound tool.
@@ -17,7 +21,6 @@ import type {
   ChatMessage,
   CheckpointResult,
   PlanStep,
-  RunPlanResult,
   SceneGraph,
   ToolSummary,
   TraceEntry,
@@ -27,6 +30,16 @@ interface Props {
   tools: ToolSummary[];
   onSceneGraphUpdated: () => void;
   onToolSaved: () => void;
+}
+
+// A checkpoint reached during a run, awaiting a pass/fail decision before the
+// plan may continue.
+interface Pending {
+  step: number; // 1-based step# that paused us
+  description: string;
+  screenshot: string | null;
+  nextIndex: number; // resume from here on PASS
+  done: boolean; // this was the last step in the plan
 }
 
 function fmtAssertion(a: Assertion): string {
@@ -67,18 +80,25 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
   const [chatInput, setChatInput] = useState('');
   const [useScreenshot, setUseScreenshot] = useState(false);
   const [countdown, setCountdown] = useState(5);
-  const [stopOnFail, setStopOnFail] = useState(false);
+  const [aiVerify, setAiVerify] = useState(false);
 
   const [sending, setSending] = useState(false);
   const [running, setRunning] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [repairing, setRepairing] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [steps, setSteps] = useState<PlanStep[]>([]);
-  const [result, setResult] = useState<RunPlanResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
+
+  // ── Run state (segmented, verification-gated) ───────────────────
+  const [runTrace, setRunTrace] = useState<TraceEntry[]>([]);
+  const [runScene, setRunScene] = useState<SceneGraph | null>(null);
+  const [runActive, setRunActive] = useState(false); // a run is in progress/paused
+  const [runFinished, setRunFinished] = useState(false);
+  const [pending, setPending] = useState<Pending | null>(null);
 
   const [flagged, setFlagged] = useState<Set<number>>(new Set());
   const [repairNote, setRepairNote] = useState('');
@@ -96,9 +116,23 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
   const toolNames = tools.map((t) => t.name);
   const paramsOf = (name: string): string[] =>
     tools.find((t) => t.name === name)?.params ?? [];
-  const busy = sending || running || repairing || saving;
+  const busy = sending || running || verifying || repairing || saving;
+  // Editing the plan / starting a new run is locked while one is mid-flight
+  // (running, paused at a checkpoint, or the critic is judging) — index changes
+  // would desync the resume cursor.
+  const editLocked = busy || runActive;
   const originalTask =
     convo.find((m) => m.role === 'user')?.content ?? '';
+
+  // Derived run outcome (from the accumulated trace).
+  const execOk =
+    runTrace.length > 0 &&
+    runTrace.every(
+      (e) => (e.result as { status?: string }).status === 'ok',
+    );
+  const checkpointsOk = runTrace.every(
+    (e) => e.checkpoint?.verification?.passed !== false,
+  );
 
   // ── Chat ────────────────────────────────────────────────────────
   async function sendChat() {
@@ -121,8 +155,7 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
         { role: 'assistant', content: JSON.stringify({ reasoning: p.reasoning, steps: p.steps }) },
       ]);
       setSteps(p.steps);
-      setResult(null);
-      setFlagged(new Set());
+      resetRunState();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -130,9 +163,20 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
     }
   }
 
-  // ── Run (with clear-or-keep gate) ───────────────────────────────
+  // ── Run (segmented, verification-gated) ─────────────────────────
+  function resetRunState() {
+    setRunTrace([]);
+    setRunScene(null);
+    setRunActive(false);
+    setRunFinished(false);
+    setPending(null);
+    setFlagged(new Set());
+    setInfo(null);
+    setError(null);
+  }
+
   async function handleRunClick() {
-    if (!steps.length) return;
+    if (!steps.length || editLocked) return;
     setError(null);
     try {
       const sg = await api.getSceneGraph();
@@ -143,39 +187,157 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
     } catch {
       /* run anyway if we can't read it */
     }
-    doRun(false);
+    startRun(false);
   }
-  async function doRun(clearFirst: boolean) {
+
+  async function startRun(clearFirst: boolean) {
     setClearPrompt(null);
+    resetRunState();
+    setRunActive(true);
+    await runSegmentFrom(0, clearFirst, true);
+  }
+
+  function finishRun() {
+    setRunActive(false);
+    setRunFinished(true);
+    setPending(null);
+  }
+
+  // Run steps[start..next checkpoint] then pause for verification (or finish).
+  async function runSegmentFrom(
+    start: number,
+    clearFirst: boolean,
+    isFirst: boolean,
+  ) {
     setRunning(true);
     setError(null);
-    setInfo(null);
-    setResult(null);
-    setFlagged(new Set());
     try {
-      const r = await api.runPlan({
+      const seg = await api.runPlanSegment({
         steps,
-        countdown,
-        stop_on_checkpoint_fail: stopOnFail,
-        clear_canvas: clearFirst,
+        start,
+        clear_canvas: isFirst && clearFirst,
+        // First segment always counts down (time to focus draw.io). Later
+        // segments need it only in manual mode — the user just clicked in the
+        // browser and must refocus draw.io; in AI mode focus never left.
+        countdown: isFirst ? countdown : aiVerify ? 0 : countdown,
       });
-      setResult(r);
+      setRunTrace((prev) => [...prev, ...seg.trace]);
+      setRunScene(seg.scene_graph);
       onSceneGraphUpdated();
+
+      // A dispatch error inside the segment stops the whole run.
+      const errored = seg.trace.some(
+        (e) => (e.result as { status?: string }).status === 'error',
+      );
+      if (errored) {
+        setError('A step failed — run stopped. Flag/fix below.');
+        finishRun();
+        return;
+      }
+
+      if (seg.checkpoint_step != null) {
+        const cp = seg.trace.find(
+          (e) => e.step === seg.checkpoint_step,
+        )?.checkpoint;
+        const p: Pending = {
+          step: seg.checkpoint_step,
+          description: cp?.description ?? '',
+          screenshot: cp?.screenshot ?? null,
+          nextIndex: seg.next_index,
+          done: seg.done,
+        };
+        setPending(p);
+        // AI mode auto-verifies (needs a screenshot); otherwise wait for the
+        // user's manual verdict.
+        if (aiVerify && p.screenshot) {
+          await runCritic(p);
+        }
+      } else if (seg.done) {
+        finishRun();
+      } else {
+        // No checkpoint but not done — shouldn't happen; continue defensively.
+        await runSegmentFrom(seg.next_index, false, false);
+      }
     } catch (e) {
       setError(String(e));
+      finishRun();
     } finally {
       setRunning(false);
     }
   }
 
+  function recordVerdict(
+    step: number,
+    mode: 'manual' | 'ai',
+    passed: boolean,
+    reasoning?: string,
+  ) {
+    setRunTrace((prev) =>
+      prev.map((e) =>
+        e.step === step && e.checkpoint
+          ? {
+              ...e,
+              checkpoint: {
+                ...e.checkpoint,
+                verification: { mode, passed, reasoning },
+              },
+            }
+          : e,
+      ),
+    );
+  }
+
+  async function runCritic(p: Pending) {
+    if (!p.screenshot) return;
+    setVerifying(true);
+    try {
+      const v = await api.critic({
+        screenshot: p.screenshot,
+        description: p.description,
+      });
+      recordVerdict(p.step, 'ai', v.passed, v.reasoning);
+      if (v.passed) {
+        await continueAfter(p);
+      } else {
+        setInfo(
+          `AI critic rejected checkpoint ${p.step}: ${v.reasoning || '(no reason given)'}`,
+        );
+        finishRun();
+      }
+    } catch (e) {
+      // Critic unavailable → fall back to a manual decision (leave pending).
+      setError(`Critic failed: ${String(e)} — verify this checkpoint manually.`);
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  async function continueAfter(p: Pending) {
+    setPending(null);
+    if (p.done) finishRun();
+    else await runSegmentFrom(p.nextIndex, false, false);
+  }
+
+  function approveCheckpoint() {
+    if (!pending) return;
+    recordVerdict(pending.step, 'manual', true);
+    void continueAfter(pending);
+  }
+
+  function rejectCheckpoint() {
+    if (!pending) return;
+    recordVerdict(pending.step, 'manual', false);
+    finishRun();
+  }
+
   // ── Repair ──────────────────────────────────────────────────────
   async function handleRepair() {
-    if (!result) return;
-    const failed: TraceEntry[] = result.trace
+    if (!runTrace.length) return;
+    const failed: TraceEntry[] = runTrace
       .filter(
         (e) =>
           flagged.has(e.step) ||
-          e.checkpoint?.passed === false ||
+          e.checkpoint?.verification?.passed === false ||
           (e.result as { status?: string }).status === 'error',
       )
       .map((e) => ({ ...e, flagged_wrong: flagged.has(e.step) }));
@@ -197,8 +359,7 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
         { role: 'assistant', content: JSON.stringify({ reasoning: p.reasoning, steps: p.steps }) },
       ]);
       setSteps(p.steps);
-      setResult(null);
-      setFlagged(new Set());
+      resetRunState();
       setRepairNote('');
       setInfo(`Loaded corrective plan (${p.steps.length} steps) — review and Run.`);
     } catch (e) {
@@ -291,9 +452,7 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
               onClick={() => {
                 setConvo([]);
                 setSteps([]);
-                setResult(null);
-                setInfo(null);
-                setError(null);
+                resetRunState();
               }}
             >
               New chat
@@ -386,7 +545,7 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
                   <select
                     className="plan__tool-select"
                     value={s.tool}
-                    disabled={busy}
+                    disabled={editLocked}
                     onChange={(e) => changeTool(i, e.target.value)}
                   >
                     {!toolNames.includes(s.tool) && (
@@ -399,9 +558,9 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
                     ))}
                   </select>
                   <span className="plan__step-spacer" />
-                  <button className="link plan__icon" title="Move up" disabled={busy || i === 0} onClick={() => moveStep(i, -1)}>↑</button>
-                  <button className="link plan__icon" title="Move down" disabled={busy || i === steps.length - 1} onClick={() => moveStep(i, 1)}>↓</button>
-                  <button className="link danger plan__icon" title="Remove step" disabled={busy} onClick={() => removeStep(i)}>✕</button>
+                  <button className="link plan__icon" title="Move up" disabled={editLocked || i === 0} onClick={() => moveStep(i, -1)}>↑</button>
+                  <button className="link plan__icon" title="Move down" disabled={editLocked || i === steps.length - 1} onClick={() => moveStep(i, 1)}>↓</button>
+                  <button className="link danger plan__icon" title="Remove step" disabled={editLocked} onClick={() => removeStep(i)}>✕</button>
                 </div>
                 {paramsOf(s.tool).length > 0 && (
                   <div className="plan__params-edit">
@@ -410,7 +569,7 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
                         <span>{p}</span>
                         <input
                           value={paramInputValue(s.params?.[p])}
-                          disabled={busy}
+                          disabled={editLocked}
                           placeholder="value"
                           onChange={(e) => setParam(i, p, e.target.value)}
                         />
@@ -424,7 +583,7 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
                     {s.checkpoint.description && (
                       <span className="plan__ckpt-desc">{s.checkpoint.description}</span>
                     )}
-                    <button className="link danger plan__ckpt-drop" disabled={busy} onClick={() => dropCheckpoint(i)}>
+                    <button className="link danger plan__ckpt-drop" disabled={editLocked} onClick={() => dropCheckpoint(i)}>
                       remove checkpoint
                     </button>
                     <div className="plan__asserts">
@@ -439,15 +598,30 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
           </ol>
 
           <div className="plan__run-actions">
-            <button className="link" onClick={addStep} disabled={busy}>+ Add step</button>
-            <label className="plan__inline">
-              <input type="checkbox" checked={stopOnFail} onChange={(e) => setStopOnFail(e.target.checked)} />
-              <span>Stop on checkpoint failure</span>
+            <button className="link" onClick={addStep} disabled={editLocked}>+ Add step</button>
+            <label
+              className="plan__inline"
+              title="When on, a vision critic judges each checkpoint screenshot. When off, you approve each checkpoint by hand."
+            >
+              <input
+                type="checkbox"
+                checked={aiVerify}
+                disabled={editLocked}
+                onChange={(e) => setAiVerify(e.target.checked)}
+              />
+              <span>Let AI verify checkpoints</span>
             </label>
-            <button className="primary" onClick={handleRunClick} disabled={busy}>
-              {running ? 'Running…' : `Run plan (${steps.length})`}
+            <button className="primary" onClick={handleRunClick} disabled={editLocked}>
+              {running ? 'Running…' : runActive ? 'Run in progress…' : `Run plan (${steps.length})`}
             </button>
           </div>
+          <p className="plan__run-hint">
+            The run pauses at every checkpoint to capture a screenshot and{' '}
+            {aiVerify
+              ? 'let the AI critic verify it'
+              : 'wait for you to verify it'}
+            . Only a PASS continues the plan.
+          </p>
 
           {/* ── Save as tool ─────────────────────────────────── */}
           <details className="plan__save">
@@ -483,48 +657,77 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
         </>
       )}
 
-      {/* ── Run results ────────────────────────────────────────── */}
-      {result && (
+      {/* ── Run trace (live) + verification + summary ──────────── */}
+      {(runActive || runFinished) && runTrace.length > 0 && (
         <div className="plan__result">
-          <div className="plan__summary">
-            <span className={`pill ${result.ok ? 'pill--ok' : 'pill--bad'}`}>
-              {result.ok ? '✓ executed' : '✗ execution error'}
-            </span>
-            <span className={`pill ${result.checkpoints_ok ? 'pill--ok' : 'pill--bad'}`}>
-              {result.checkpoints_ok ? '✓ checkpoints' : '✗ checkpoints'}
-            </span>
-            <SceneSummary sg={result.scene_graph} />
-          </div>
+          {runFinished && (
+            <div className="plan__summary">
+              <span className={`pill ${execOk ? 'pill--ok' : 'pill--bad'}`}>
+                {execOk ? '✓ executed' : '✗ execution error'}
+              </span>
+              <span className={`pill ${checkpointsOk ? 'pill--ok' : 'pill--bad'}`}>
+                {checkpointsOk ? '✓ checkpoints verified' : '✗ checkpoint rejected'}
+              </span>
+              {runScene && <SceneSummary sg={runScene} />}
+            </div>
+          )}
+
           <ol className="plan__trace">
-            {result.trace.map((e) => (
-              <TraceRow key={e.step} entry={e} flagged={flagged.has(e.step)} onFlag={() => toggleFlag(e.step)} onShot={setLightbox} />
+            {runTrace.map((e) => (
+              <TraceRow
+                key={e.step}
+                entry={e}
+                flagged={flagged.has(e.step)}
+                onFlag={() => toggleFlag(e.step)}
+                onShot={setLightbox}
+              />
             ))}
           </ol>
-          <div className="plan__repair">
-            <h3 className="plan__section">Fix</h3>
-            <p className="plan__repair-hint">
-              Flag wrong steps above, then edit the plan by hand and re-run, or
-              describe the problem and let the agent re-plan from the current
-              canvas (the fix is added to the chat).
-            </p>
-            <textarea
-              className="plan__task"
-              rows={2}
-              placeholder="What's wrong / how to fix? (optional)"
-              value={repairNote}
-              onChange={(e) => setRepairNote(e.target.value)}
-              disabled={busy}
+
+          {/* Verification gate — shown while paused at a checkpoint. */}
+          {pending && (
+            <VerificationPrompt
+              pending={pending}
+              aiVerify={aiVerify}
+              verifying={verifying}
+              onShot={setLightbox}
+              onApprove={approveCheckpoint}
+              onReject={rejectCheckpoint}
             />
-            <div className="plan__repair-actions">
-              <span className="plan__repair-count">
-                {flagged.size} flagged
-                {!result.checkpoints_ok ? ' · checkpoint failures included' : ''}
-              </span>
-              <button className="primary" onClick={handleRepair} disabled={busy}>
-                {repairing ? 'Asking agent…' : 'Ask agent to fix'}
-              </button>
+          )}
+
+          {running && !pending && (
+            <div className="plan__running-banner">running steps…</div>
+          )}
+
+          {/* Repair — available once the run has finished. */}
+          {runFinished && (
+            <div className="plan__repair">
+              <h3 className="plan__section">Fix</h3>
+              <p className="plan__repair-hint">
+                Flag wrong steps above, then edit the plan by hand and re-run, or
+                describe the problem and let the agent re-plan from the current
+                canvas (the fix is added to the chat).
+              </p>
+              <textarea
+                className="plan__task"
+                rows={2}
+                placeholder="What's wrong / how to fix? (optional)"
+                value={repairNote}
+                onChange={(e) => setRepairNote(e.target.value)}
+                disabled={busy}
+              />
+              <div className="plan__repair-actions">
+                <span className="plan__repair-count">
+                  {flagged.size} flagged
+                  {!checkpointsOk ? ' · rejected checkpoints included' : ''}
+                </span>
+                <button className="primary" onClick={handleRepair} disabled={busy}>
+                  {repairing ? 'Asking agent…' : 'Ask agent to fix'}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -541,8 +744,8 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
             </p>
             <div className="plan__modal-actions">
               <button onClick={() => setClearPrompt(null)}>Cancel</button>
-              <button onClick={() => doRun(false)}>Keep &amp; run</button>
-              <button className="primary" onClick={() => doRun(true)}>Clear &amp; run</button>
+              <button onClick={() => startRun(false)}>Keep &amp; run</button>
+              <button className="primary" onClick={() => startRun(true)}>Clear &amp; run</button>
             </div>
           </div>
         </div>
@@ -602,21 +805,26 @@ function CheckpointCard({ cp, onShot }: { cp: CheckpointResult; onShot: (name: s
   if (cp.skipped) {
     return <div className="plan__ckpt plan__ckpt--skip">checkpoint skipped ({cp.reason})</div>;
   }
-  const cls = cp.passed ? 'plan__ckpt--ok' : 'plan__ckpt--bad';
+  // The verification verdict (human/AI from the screenshot) is authoritative.
+  const v = cp.verification;
+  const cls = !v
+    ? 'plan__ckpt--pending'
+    : v.passed
+      ? 'plan__ckpt--ok'
+      : 'plan__ckpt--bad';
+  const mark = !v ? '…' : v.passed ? '✓' : '✗';
+  const verdict = !v
+    ? 'awaiting verification'
+    : `${v.passed ? 'verified' : 'rejected'} · ${v.mode === 'ai' ? 'AI critic' : 'manual'}`;
   return (
     <div className={`plan__ckpt ${cls}`}>
       <div className="plan__ckpt-head">
-        <span className="plan__ckpt-mark">{cp.passed ? '✓' : '✗'}</span>
+        <span className="plan__ckpt-mark">{mark}</span>
         <strong>Checkpoint</strong>
+        <span className="plan__ckpt-verdict">{verdict}</span>
         {cp.description && <span className="plan__ckpt-desc">{cp.description}</span>}
       </div>
-      <ul className="plan__asserts-results">
-        {(cp.results ?? []).map((r, i) => (
-          <li key={i} className={r.passed ? 'is-ok' : 'is-bad'}>
-            <span>{r.passed ? '✓' : '✗'}</span> {r.detail}
-          </li>
-        ))}
-      </ul>
+      {v?.reasoning && <div className="plan__ckpt-reason">“{v.reasoning}”</div>}
       {cp.screenshot && (
         <button className="plan__shot" onClick={() => onShot(cp.screenshot as string)} title="Click to enlarge">
           <img src={api.screenshotUrl(cp.screenshot)} alt="checkpoint" />
@@ -624,6 +832,80 @@ function CheckpointCard({ cp, onShot }: { cp: CheckpointResult; onShot: (name: s
       )}
       {cp.screenshot_error && (
         <div className="plan__shot-err">screenshot failed: {cp.screenshot_error}</div>
+      )}
+      {/* Scene-graph assertions — secondary hint only, not the gate. */}
+      {(cp.results?.length ?? 0) > 0 && (
+        <details className="plan__ckpt-hints">
+          <summary>structural hints (scene graph · may be stale)</summary>
+          <ul className="plan__asserts-results">
+            {(cp.results ?? []).map((r, i) => (
+              <li key={i} className={r.passed ? 'is-ok' : 'is-bad'}>
+                <span>{r.passed ? '✓' : '✗'}</span> {r.detail}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function VerificationPrompt({
+  pending,
+  aiVerify,
+  verifying,
+  onShot,
+  onApprove,
+  onReject,
+}: {
+  pending: Pending;
+  aiVerify: boolean;
+  verifying: boolean;
+  onShot: (name: string) => void;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const aiAuto = aiVerify && !!pending.screenshot;
+  return (
+    <div className="plan__verify">
+      <div className="plan__verify-head">
+        <span className="badge badge--ckpt">checkpoint {pending.step}</span>
+        <strong>Verify before continuing</strong>
+      </div>
+      {pending.description && (
+        <p className="plan__verify-desc">Expected: {pending.description}</p>
+      )}
+      {pending.screenshot ? (
+        <button
+          className="plan__shot plan__shot--lg"
+          onClick={() => onShot(pending.screenshot as string)}
+          title="Click to enlarge"
+        >
+          <img src={api.screenshotUrl(pending.screenshot)} alt="checkpoint screenshot" />
+        </button>
+      ) : (
+        <p className="plan__verify-noshot">
+          No screenshot was captured — verify on the draw.io canvas directly.
+        </p>
+      )}
+      {aiAuto ? (
+        <div className="plan__verify-ai">
+          {verifying ? 'AI critic is verifying…' : 'AI critic is deciding…'}
+        </div>
+      ) : (
+        <div className="plan__verify-actions">
+          {aiVerify && !pending.screenshot && (
+            <span className="plan__verify-fallback">
+              AI verify needs a screenshot — decide manually:
+            </span>
+          )}
+          <button className="primary" onClick={onApprove}>
+            ✓ Looks right — continue
+          </button>
+          <button className="danger" onClick={onReject}>
+            ✗ Wrong — stop
+          </button>
+        </div>
       )}
     </div>
   );

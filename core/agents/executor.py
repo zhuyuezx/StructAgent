@@ -19,14 +19,17 @@ Two inference modes, selected per-call via ``infer(screenshot_path=…)``:
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 from typing import Any, Dict, List, Optional
 
 import ollama
 
 from core import config
+from core.agents._common import (
+    active_selection_summary,
+    element_summary,
+    extract_json,
+)
 from core.state import scene_graph as _sg
 from core.tools import TOOL_CATALOG
 
@@ -47,90 +50,8 @@ def _tool_table() -> str:
     return header + "\n" + "\n".join(lines)
 
 
-def _element_summary(ui_graph: Dict[str, Any]) -> str:
-    """
-    Coordinate-free summary of detected elements.
-    Shows names only — no (x, y) values.
-    """
-    parts = []
-
-    tools = list(ui_graph.get("UI_Elements", {}).keys())
-    if tools:
-        parts.append("### Sidebar Shapes (use with `place_shape`)")
-        for t in tools:
-            parts.append(f"- `{t}`")
-
-    nodes = ui_graph.get("Canvas_Nodes", [])
-    if nodes:
-        parts.append("\n### Canvas Nodes")
-        for n in nodes:
-            parts.append(f"- id=`{n['id']}`, text=`{n.get('text', '')}`")
-
-    edges = ui_graph.get("Canvas_Edges", [])
-    if edges:
-        parts.append("\n### Canvas Edges")
-        for e in edges:
-            parts.append(f"- `{e['source']}` → `{e['target']}`")
-
-    return "\n".join(parts)
-
-
-def _active_selection_summary(ui_graph: Dict[str, Any]) -> str:
-    """
-    Describe the currently-selected shape and the semantic operations
-    available on it. Coordinate-free — the model picks operations by name
-    and direction, never by handle position.
-    """
-    h = ui_graph.get("selected_handles")
-    if not h:
-        return (
-            "### Active Selection\n"
-            "_No shape currently selected._ Use `click_node` to select a "
-            "canvas node, or `scan_handles` to refresh after a placement."
-        )
-
-    bbox = h.get("shape_bbox") or [None] * 4
-    resize_dirs = sorted(_invert_resize_slots(h.get("resize", {})))
-    extend_dirs = sorted(h.get("extend", {}).keys())
-    can_rotate = bool(h.get("rotate"))
-
-    size_line = (
-        f"  - size: {bbox[2]}×{bbox[3]} logical px"
-        if bbox[2] is not None else "  - size: unknown"
-    )
-    lines = [
-        "### Active Selection",
-        "A shape is selected. You can manipulate it with these semantic",
-        "operations — pass only the direction/amount, the framework handles",
-        "the click/drag coordinates:",
-        "",
-        size_line,
-        f"  - `resize_shape(direction, amount)` — directions available: "
-        f"{', '.join(resize_dirs) if resize_dirs else '(none detected)'}",
-        f"  - `extend_shape(direction)` — directions available: "
-        f"{', '.join(extend_dirs) if extend_dirs else '(none detected — try scan_handles)'}",
-    ]
-    if can_rotate:
-        lines.append("  - `rotate_shape(angle_degrees)` — rotate around shape center")
-    else:
-        lines.append("  - rotate_shape: NOT available (no rotate handle detected)")
-    lines.append("")
-    lines.append(
-        "`amount` is in logical pixels; reasonable values are a fraction of "
-        "the shape's current size. `scan_handles` re-scans after any action "
-        "that may have changed the shape's geometry."
-    )
-    return "\n".join(lines)
-
-
-_DIR_FOR_RESIZE_SLOT = {
-    "tm": "n", "bm": "s", "mr": "e", "ml": "w",
-    "tl": "nw", "tr": "ne", "bl": "sw", "br": "se",
-}
-
-
-def _invert_resize_slots(resize: Dict[str, Any]) -> List[str]:
-    return [_DIR_FOR_RESIZE_SLOT[k] for k in resize if k in _DIR_FOR_RESIZE_SLOT]
+# The coordinate-free state renderers (element_summary, active_selection_summary)
+# and JSON extraction live in core.agents._common — shared with the planner.
 
 
 _INPUTS_SCREENSHOT = """\
@@ -290,9 +211,9 @@ def build_prompt(ui_graph: Dict[str, Any], use_screenshot: bool = True) -> str:
     return _SYSTEM_TEMPLATE.format(
         inputs_block=inputs_block,
         tool_table=_tool_table(),
-        element_summary=_element_summary(ui_graph),
+        element_summary=element_summary(ui_graph),
         scene_graph_summary=_sg.summary_for_prompt(sg_data),
-        active_selection=_active_selection_summary(ui_graph),
+        active_selection=active_selection_summary(ui_graph),
     )
 
 
@@ -300,30 +221,9 @@ def build_prompt(ui_graph: Dict[str, Any], use_screenshot: bool = True) -> str:
 # Response parsing
 # ---------------------------------------------------------------------------
 
-_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
-
-
 def parse_response(raw: str) -> Dict[str, Any]:
-    """Extract a JSON dict from the LLM's raw text output."""
-    text = raw.strip()
-
-    # Try raw JSON first
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Fenced JSON block
-    match = _JSON_BLOCK_RE.search(text)
-    if match:
-        return json.loads(match.group(1))
-
-    # First { … last }
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        return json.loads(text[start:end + 1])
-
-    raise ValueError(f"Could not parse JSON from LLM response:\n{text}")
+    """Extract the decision JSON object from the LLM's raw text output."""
+    return extract_json(raw)
 
 
 # ---------------------------------------------------------------------------
