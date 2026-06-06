@@ -5,6 +5,10 @@ import type {
   ChatPlanBody,
   CriticBody,
   CriticResult,
+  DetectBody,
+  DetectResult,
+  LabelBody,
+  LabelResult,
   PlanBody,
   PlanResult,
   RepairBody,
@@ -14,6 +18,8 @@ import type {
   RunPlanSegmentBody,
   RunResult,
   RunStepsBody,
+  SaveExploreBody,
+  SaveExploreResult,
   SaveToolBody,
   SceneGraph,
   SegmentResult,
@@ -112,4 +118,20 @@ export const api = {
     }),
   screenshotUrl: (name: string) =>
     `${BASE}/screenshot/${encodeURIComponent(name)}`,
+  // Explore — sidebar detection + labeling
+  exploreDetect: (body: DetectBody) =>
+    request<DetectResult>('/explore/detect', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  exploreLabel: (body: LabelBody) =>
+    request<LabelResult>('/explore/label', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  exploreSave: (body: SaveExploreBody) =>
+    request<SaveExploreResult>('/explore/save', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 };

@@ -222,3 +222,44 @@ export interface CriticResult {
   passed: boolean;
   reasoning: string;
 }
+
+// === Explore — sidebar detection + labeling ================================
+
+export interface ExploreIcon {
+  x: number;   // logical center-x
+  y: number;   // logical center-y
+  w: number;   // logical width
+  h: number;   // logical height
+  label?: string | null;
+}
+
+export interface DetectResult {
+  screenshot: string;      // filename served via /api/screenshot/{name}
+  logical_width: number;
+  logical_height: number;
+  screen_scale: number;
+  icons: ExploreIcon[];
+}
+
+export interface LabelBody {
+  icons: ExploreIcon[];
+  indices?: number[] | null;   // null = label all
+  countdown?: number;
+}
+
+export interface LabelResult {
+  icons: ExploreIcon[];
+}
+
+export interface SaveExploreBody {
+  icons: ExploreIcon[];
+}
+
+export interface SaveExploreResult {
+  saved: number;
+  path: string;
+}
+
+export interface DetectBody {
+  countdown?: number;
+}

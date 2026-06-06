@@ -759,3 +759,170 @@ def dedupe_ui_graph() -> UiGraphResult:
     logger.info("[api] deduped captured icons: %s", diff)
     _G["UI_Elements"] = config.ui_graph().get("UI_Elements", {})
     return get_ui_graph()
+
+
+# ===========================================================================
+# Explore — interactive sidebar detection + labeling (builds ui_graph.json)
+# ===========================================================================
+#
+# Workflow:
+#   1. POST /api/explore/detect  → screenshot + CV → working set of icon boxes
+#   2. (frontend) user edits/adds/removes boxes, edits labels
+#   3. POST /api/explore/label   → VLM labels requested icons (uses screenshot)
+#   4. POST /api/explore/save    → writes the final icon set to ui_graph.json
+#
+# The frontend is the source of truth for the working icon set after step 1.
+# Label and Save both receive the current icon list in the request body so
+# manual edits (add/delete/relabel) are preserved across LLM label calls.
+
+# Server-side state: only the screenshot path is kept (for cropping during
+# labeling). The icon list lives in the frontend after the initial detect.
+_explore_screenshot: Optional[str] = None
+_explore_logical_w: int = 0
+_explore_logical_h: int = 0
+
+
+def _get_domain_label_prompt() -> Optional[str]:
+    """Load the active domain's VLM label prompt, or None for generic fallback."""
+    import importlib
+    try:
+        mod = importlib.import_module(f"domains.{config.domain()}.perception")
+        return getattr(mod, "LABEL_PROMPT", None)
+    except ImportError:
+        return None
+
+
+class ExploreIcon(BaseModel):
+    x: int                      # logical center-x
+    y: int                      # logical center-y
+    w: int                      # logical width
+    h: int                      # logical height
+    label: Optional[str] = None
+
+
+class DetectResult(BaseModel):
+    screenshot: str             # filename, served via GET /api/screenshot/{name}
+    logical_width: int
+    logical_height: int
+    screen_scale: int
+    icons: List[ExploreIcon]
+
+
+class LabelBody(BaseModel):
+    icons: List[ExploreIcon]                  # current frontend working set
+    indices: Optional[List[int]] = None       # None = label all
+    countdown: int = 0
+
+
+class LabelResult(BaseModel):
+    icons: List[ExploreIcon]                  # full updated list
+
+
+class SaveExploreBody(BaseModel):
+    icons: List[ExploreIcon]
+
+
+class SaveExploreResult(BaseModel):
+    saved: int
+    path: str
+
+
+class DetectBody(BaseModel):
+    countdown: int = 0
+
+
+@app.post("/api/explore/detect", response_model=DetectResult)
+def explore_detect(body: DetectBody) -> DetectResult:
+    """Screenshot + CV detect icon-sized regions.
+
+    Takes a fresh screenshot (countdown lets the user switch to the target
+    window), runs OpenCV contour detection over the configured sidebar region,
+    and returns the icon boxes in logical pixels together with the screenshot
+    dimensions so the frontend can render an accurate SVG overlay.
+    """
+    global _explore_screenshot, _explore_logical_w, _explore_logical_h
+
+    from core.capture import screenshot as _screenshot
+    from core.perception.detect import detect_icons
+    import cv2
+
+    _countdown(body.countdown)
+    path = _screenshot("_explore_detect.png")
+    _explore_screenshot = path
+
+    img = cv2.imread(path)
+    if img is None:
+        raise HTTPException(500, "Could not read screenshot")
+    phys_h, phys_w = img.shape[:2]
+    scale = config.screen_scale()
+    _explore_logical_w = phys_w // scale
+    _explore_logical_h = phys_h // scale
+
+    raw_icons = detect_icons(path)
+    icons = [
+        ExploreIcon(x=ic["x"], y=ic["y"], w=ic["w"], h=ic["h"])
+        for ic in raw_icons
+    ]
+    logger.info("[explore/detect] %d icons found in %s", len(icons), path)
+    return DetectResult(
+        screenshot=os.path.basename(path),
+        logical_width=_explore_logical_w,
+        logical_height=_explore_logical_h,
+        screen_scale=scale,
+        icons=icons,
+    )
+
+
+@app.post("/api/explore/label", response_model=LabelResult)
+def explore_label(body: LabelBody) -> LabelResult:
+    """AI-label some or all icons using the VLM.
+
+    The client sends its current working icon set (including any manual edits)
+    and optionally a list of indices to label.  The server crops each icon from
+    the last-captured explore screenshot and calls the VLM.  Returns the full
+    updated icon list.
+    """
+    global _explore_screenshot
+
+    if not _explore_screenshot or not os.path.isfile(_explore_screenshot):
+        raise HTTPException(400, "No screenshot available — run /explore/detect first")
+
+    from core.perception.label import label_icons as _label
+
+    _countdown(body.countdown)
+
+    all_icons = [ic.model_dump() for ic in body.icons]
+    indices = body.indices if body.indices is not None else list(range(len(all_icons)))
+    valid_indices = [i for i in indices if 0 <= i < len(all_icons)]
+    subset = [all_icons[i] for i in valid_indices]
+
+    prompt = _get_domain_label_prompt()
+    labeled_subset = _label(_explore_screenshot, subset, label_prompt=prompt)
+
+    result = list(all_icons)
+    for orig_idx, labeled in zip(valid_indices, labeled_subset):
+        result[orig_idx] = {**result[orig_idx], "label": labeled.get("label")}
+
+    logger.info("[explore/label] labeled %d icon(s)", len(valid_indices))
+    return LabelResult(icons=[
+        ExploreIcon(x=ic["x"], y=ic["y"], w=ic["w"], h=ic["h"], label=ic.get("label"))
+        for ic in result
+    ])
+
+
+@app.post("/api/explore/save", response_model=SaveExploreResult)
+def explore_save(body: SaveExploreBody) -> SaveExploreResult:
+    """Persist the working icon set to ui_graph.json and reload the live catalog.
+
+    Writes the icons the frontend sends (with whatever labels they have) to
+    ``state/ui_graph.json`` via the same :func:`save_ui_state` path used by the
+    notebook-based explorer, then reloads ``_G["UI_Elements"]`` so subsequent
+    ``place_shape`` dispatches use the updated positions without a server restart.
+    """
+    from core.state.ui_graph import save_ui_state
+
+    icons_dicts = [ic.model_dump() for ic in body.icons]
+    out_path = save_ui_state(icons_dicts)
+    _G["UI_Elements"] = config.ui_graph().get("UI_Elements", {})
+    logger.info("[explore/save] saved %d icons → %s", len(icons_dicts), out_path)
+    return SaveExploreResult(saved=len(icons_dicts), path=os.path.basename(out_path))

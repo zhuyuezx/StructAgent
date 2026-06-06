@@ -8,20 +8,47 @@ into the matching scene-graph object so the next operation reasons
 about an accurate canvas state.
 
 Shared by ``core.tools.actions`` and ``domains.drawio.operations``.
+
+Handle detection is domain-specific.  The active domain must expose a
+``detect_handles(screenshot_path) -> SelectionHandles`` function in its
+``domains.<name>.perception`` module.  Domains that have no selection-
+chrome concept (e.g. iMovie) simply omit the function; reconcile then
+skips handle-based bbox updates and returns an empty SelectionHandles.
 """
 
 from __future__ import annotations
 
+import importlib
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from core.capture import screenshot as _capture_screenshot
-from core.perception.handles import detect_handles, SelectionHandles
+from core.perception.handles import SelectionHandles  # data structure only
 from core.state import scene_graph as _sg
 from core.tools.atoms import atom_move_to, atom_press
 
 logger = logging.getLogger(__name__)
+
+
+# ===========================================================================
+# Domain handle-detector loader
+# ===========================================================================
+
+def _load_handle_detector() -> Optional[Callable[[str], SelectionHandles]]:
+    """Return the active domain's ``detect_handles`` function, or None.
+
+    Loads ``domains.<domain>.perception.detect_handles`` at call time so the
+    domain plugin can be swapped without restarting.  Returns None when the
+    domain has no handle concept (e.g. iMovie).
+    """
+    from core import config as _cfg
+    try:
+        mod = importlib.import_module(f"domains.{_cfg.domain()}.perception")
+        fn = getattr(mod, "detect_handles", None)
+        return fn  # None if the domain doesn't define it
+    except ImportError:
+        return None
 
 
 # ===========================================================================
@@ -54,9 +81,19 @@ _HOVER_DELAY = 0.7
 def refresh_handles(
     ui_graph: Dict[str, Any], hint_bbox: Optional[tuple] = None,
 ) -> SelectionHandles:
-    """Snapshot the screen, detect selection handles, store on ui_graph."""
+    """Snapshot the screen, detect selection handles, store on ui_graph.
+
+    If the active domain does not provide a ``detect_handles`` function
+    (e.g. a domain without selection chrome), clears ``selected_handles``
+    and returns an empty SelectionHandles immediately.
+    """
+    detect_fn = _load_handle_detector()
+    if detect_fn is None:
+        ui_graph["selected_handles"] = None
+        return SelectionHandles()
+
     path = _capture_screenshot("_handles_scan_a.png")
-    handles = detect_handles(path)
+    handles = detect_fn(path)
 
     bbox = handles.shape_bbox or hint_bbox
     if bbox and (not handles.extend or len(handles.extend) < 4):
@@ -64,7 +101,7 @@ def refresh_handles(
         atom_move_to(cx, cy)
         time.sleep(_HOVER_DELAY)
         path = _capture_screenshot("_handles_scan_b.png")
-        handles = detect_handles(path)
+        handles = detect_fn(path)
 
     ui_graph["selected_handles"] = handles.to_dict() if handles.is_valid() else None
     return handles

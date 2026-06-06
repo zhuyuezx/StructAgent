@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { ComposerForm } from './components/ComposerForm';
 import { ExecutePanel } from './components/ExecutePanel';
+import { ExplorePanel } from './components/ExplorePanel';
 import { PlanPanel } from './components/PlanPanel';
 import { SceneGraphView } from './components/SceneGraphView';
 import { ToolDetail } from './components/ToolDetail';
@@ -13,7 +14,7 @@ import type {
   ToolSummary,
 } from './types';
 
-type Tab = 'inspect' | 'execute' | 'compose' | 'plan';
+type Tab = 'inspect' | 'execute' | 'compose' | 'plan' | 'explore';
 
 export default function App() {
   const [tools, setTools] = useState<ToolSummary[]>([]);
@@ -162,19 +163,27 @@ export default function App() {
           >
             Plan
           </button>
+          <button
+            className={tab === 'explore' ? 'active' : ''}
+            onClick={() => setTab('explore')}
+          >
+            Explore
+          </button>
         </nav>
         {globalError && <div className="app__error">{globalError}</div>}
       </header>
 
-      <main className="app__main">
-        <ToolTree
-          tools={tools}
-          icons={icons}
-          selected={selected}
-          onSelect={setSelected}
-          onReload={rescanTools}
-          onDedupeIcons={dedupeIcons}
-        />
+      <main className={`app__main ${tab === 'explore' ? 'app__main--full' : ''}`}>
+        {tab !== 'explore' && (
+          <ToolTree
+            tools={tools}
+            icons={icons}
+            selected={selected}
+            onSelect={setSelected}
+            onReload={rescanTools}
+            onDedupeIcons={dedupeIcons}
+          />
+        )}
 
         <section className="app__content">
           {tab === 'inspect' && (
@@ -204,15 +213,18 @@ export default function App() {
               onToolSaved={reloadTools}
             />
           )}
+          {tab === 'explore' && <ExplorePanel />}
         </section>
 
-        <aside className="app__sidebar-right">
-          <SceneGraphView
-            graph={sceneGraph}
-            onReset={handleResetSceneGraph}
-            onRefresh={reloadSceneGraph}
-          />
-        </aside>
+        {tab !== 'explore' && (
+          <aside className="app__sidebar-right">
+            <SceneGraphView
+              graph={sceneGraph}
+              onReset={handleResetSceneGraph}
+              onRefresh={reloadSceneGraph}
+            />
+          </aside>
+        )}
       </main>
     </div>
   );

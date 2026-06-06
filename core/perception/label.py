@@ -3,18 +3,29 @@ Label — VLM-based labeling for detected icons/regions.
 
 Sends per-element image crops to a vision LLM and tags each with a short
 shape/role label.
+
+The labeling prompt is domain-specific.  Pass ``label_prompt`` explicitly, or
+let the caller load it from the active domain's ``perception.LABEL_PROMPT``.
+A generic fallback is used when no prompt is supplied.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import cv2
 
 from core import config
 
 logger = logging.getLogger(__name__)
+
+
+_GENERIC_LABEL_PROMPT = (
+    "What UI element or icon is shown in this image? "
+    "Reply with ONLY a short label — one or two words, underscores for spaces, "
+    "no punctuation (e.g. Rectangle, Toggle_Button, Text_Field)."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -24,11 +35,24 @@ logger = logging.getLogger(__name__)
 def label_icons(
     screenshot_path: str,
     icons: List[Dict[str, Any]],
-    timeout: float | None = None,
-    max_retries: int | None = None,
+    *,
+    label_prompt: Optional[str] = None,
+    timeout: Optional[float] = None,
+    max_retries: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    """
-    Send each cropped icon to the VLM to identify its shape type.
+    """Send each cropped icon to the VLM to identify its type.
+
+    Parameters
+    ----------
+    screenshot_path:
+        Full-screen (or region) capture from which icon crops are extracted.
+    icons:
+        Each dict must have ``x, y, w, h`` in logical pixels (center + size).
+        An optional ``_px`` key provides physical-pixel equivalents; when absent
+        the logical coords are scaled by ``config.screen_scale()``.
+    label_prompt:
+        Domain-specific VLM prompt.  Defaults to a generic fallback.
+        Load from ``domains.<name>.perception.LABEL_PROMPT`` for best results.
 
     Uses ``ollama.Client`` with a real HTTP timeout so hung requests
     are actually cancelled.
@@ -41,6 +65,7 @@ def label_icons(
     scale = config.screen_scale()
     timeout = timeout or config.label_timeout()
     max_retries = max_retries or config.label_max_retries()
+    prompt = label_prompt or _GENERIC_LABEL_PROMPT
 
     client = ollama.Client(timeout=httpx.Timeout(timeout, connect=10.0))
 
@@ -67,13 +92,7 @@ def label_icons(
 
         messages = [{
             "role": "user",
-            "content": (
-                "This is a small icon from draw.io's shape sidebar. "
-                "What shape does it represent? Reply with ONLY a short "
-                "label like Rectangle, Ellipse, Rounded_Rectangle, Diamond, "
-                "Triangle, Arrow, Text, Cylinder, Cloud, etc. "
-                "One or two words, use underscores."
-            ),
+            "content": prompt,
             "images": [img_bytes],
         }]
 
