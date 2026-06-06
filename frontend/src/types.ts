@@ -244,6 +244,7 @@ export interface DetectResult {
 export interface LabelBody {
   icons: ExploreIcon[];
   indices?: number[] | null;   // null = label all
+  domain?: string;             // interface to label for
   countdown?: number;
 }
 
@@ -253,6 +254,7 @@ export interface LabelResult {
 
 export interface SaveExploreBody {
   icons: ExploreIcon[];
+  domain?: string;             // interface to write (defaults to active)
 }
 
 export interface SaveExploreResult {
@@ -262,4 +264,21 @@ export interface SaveExploreResult {
 
 export interface DetectBody {
   countdown?: number;
+}
+
+// === Interface (domain) switching =========================================
+
+export interface DomainsResult {
+  active: string;
+  available: string[];
+}
+
+export interface SetDomainBody {
+  domain: string;
+}
+
+export interface SetDomainResult {
+  active: string;
+  available: string[];
+  tool_count: number;
 }

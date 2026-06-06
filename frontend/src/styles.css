@@ -260,6 +260,44 @@ fieldset[disabled] {
   border-radius: var(--radius-sm);
 }
 
+/* Interface (domain) switcher — top-right of the header */
+.app__domain {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+/* When an error is showing it already claims the auto margin; keep the
+   switcher snug to the right edge after it. */
+.app__error + .app__domain {
+  margin-left: 16px;
+}
+.app__domain select {
+  padding: 5px 28px 5px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+.app__domain select:hover {
+  border-color: var(--accent);
+}
+.app__domain select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
 .app__main {
   flex: 1;
   display: grid;
@@ -1729,6 +1767,16 @@ fieldset[disabled] {
   background: #c4ecd9;
 }
 
+.explore-target {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.explore-target strong {
+  color: var(--accent-strong);
+  text-transform: none;
+}
 .explore-count {
   margin-left: auto;
   font-size: 12px;

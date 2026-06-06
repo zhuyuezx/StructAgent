@@ -38,7 +38,14 @@ function stopEv(e: React.SyntheticEvent) {
   e.stopPropagation();
 }
 
-export function ExplorePanel() {
+interface Props {
+  // The interface this panel is capturing for. Detect/label/save all target
+  // this domain explicitly, so a capture always lands on the interface the
+  // user is looking at — never a stale server-side guess.
+  domain: string;
+}
+
+export function ExplorePanel({ domain }: Props) {
   const [icons, setIcons] = useState<ExploreIcon[]>([]);
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [logicalW, setLogicalW] = useState(0);
@@ -99,7 +106,7 @@ export function ExplorePanel() {
     setStatus(null);
     setLoading('label-all');
     try {
-      const res = await api.exploreLabel({ icons, indices: null });
+      const res = await api.exploreLabel({ icons, indices: null, domain });
       setIcons(res.icons);
       setStatus('AI labeling complete.');
     } catch (e) {
@@ -107,7 +114,7 @@ export function ExplorePanel() {
     } finally {
       setLoading(null);
     }
-  }, [screenshot, icons]);
+  }, [screenshot, icons, domain]);
 
   // --- AI label one ----------------------------------------------------
   const handleLabelOne = useCallback(async (idx: number) => {
@@ -115,14 +122,14 @@ export function ExplorePanel() {
     setError(null);
     setLoading({ kind: 'label-one', index: idx });
     try {
-      const res = await api.exploreLabel({ icons, indices: [idx] });
+      const res = await api.exploreLabel({ icons, indices: [idx], domain });
       setIcons(res.icons);
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(null);
     }
-  }, [screenshot, icons]);
+  }, [screenshot, icons, domain]);
 
   // --- Save ------------------------------------------------------------
   const handleSave = useCallback(async () => {
@@ -131,14 +138,14 @@ export function ExplorePanel() {
     setStatus(null);
     setLoading('saving');
     try {
-      const res = await api.exploreSave({ icons });
+      const res = await api.exploreSave({ icons, domain });
       setStatus(`Saved ${res.saved} icon(s) → ${res.path}`);
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(null);
     }
-  }, [icons]);
+  }, [icons, domain]);
 
   // --- Manual label edit -----------------------------------------------
   function updateLabel(idx: number, label: string) {
@@ -241,8 +248,14 @@ export function ExplorePanel() {
           onClick={handleSave}
           disabled={isBusy || icons.length === 0}
         >
-          {loading === 'saving' ? '⏳ Saving…' : '💾 Save to ui_graph.json'}
+          {loading === 'saving'
+            ? '⏳ Saving…'
+            : `💾 Save to ui_graph.${domain}.json`}
         </button>
+
+        <span className="explore-target" title="Saving to this interface">
+          interface: <strong>{domain}</strong>
+        </span>
 
         <span className="explore-count">
           {icons.length > 0 && `${icons.length} icon${icons.length !== 1 ? 's' : ''}`}

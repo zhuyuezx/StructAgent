@@ -25,6 +25,8 @@ export default function App() {
   const [sceneGraph, setSceneGraph] = useState<SceneGraph | null>(null);
   const [tab, setTab] = useState<Tab>('inspect');
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [domains, setDomains] = useState<string[]>([]);
+  const [activeDomain, setActiveDomain] = useState<string>('drawio');
 
   // Soft reload: just re-fetch the catalog from server memory.
   const reloadTools = useCallback(async () => {
@@ -85,11 +87,40 @@ export default function App() {
     }
   }, []);
 
+  const reloadDomains = useCallback(async () => {
+    try {
+      const res = await api.getDomains();
+      setDomains(res.available);
+      setActiveDomain(res.active);
+    } catch (e) {
+      setGlobalError(String(e));
+    }
+  }, []);
+
   useEffect(() => {
     reloadTools();
     reloadSceneGraph();
     reloadIcons();
-  }, [reloadTools, reloadSceneGraph, reloadIcons]);
+    reloadDomains();
+  }, [reloadTools, reloadSceneGraph, reloadIcons, reloadDomains]);
+
+  // Switch the active interface: backend swaps the live ui_graph + resets the
+  // canvas; we then re-pull everything tied to the interface.
+  const handleDomainChange = useCallback(
+    async (name: string) => {
+      if (name === activeDomain) return;
+      try {
+        const res = await api.setDomain({ domain: name });
+        setActiveDomain(res.active);
+        setSelected(null);
+        await Promise.all([reloadTools(), reloadIcons(), reloadSceneGraph()]);
+        setGlobalError(null);
+      } catch (e) {
+        setGlobalError(String(e));
+      }
+    },
+    [activeDomain, reloadTools, reloadIcons, reloadSceneGraph],
+  );
 
   // Fetch detail when selection changes.
   useEffect(() => {
@@ -171,6 +202,19 @@ export default function App() {
           </button>
         </nav>
         {globalError && <div className="app__error">{globalError}</div>}
+        <label className="app__domain">
+          <span>Interface</span>
+          <select
+            value={activeDomain}
+            onChange={(e) => handleDomainChange(e.target.value)}
+          >
+            {domains.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+        </label>
       </header>
 
       <main className={`app__main ${tab === 'explore' ? 'app__main--full' : ''}`}>
@@ -213,7 +257,9 @@ export default function App() {
               onToolSaved={reloadTools}
             />
           )}
-          {tab === 'explore' && <ExplorePanel />}
+          {tab === 'explore' && (
+            <ExplorePanel key={activeDomain} domain={activeDomain} />
+          )}
         </section>
 
         {tab !== 'explore' && (

@@ -27,6 +27,7 @@ Endpoints
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import os
@@ -752,8 +753,9 @@ def dedupe_ui_graph() -> UiGraphResult:
 
     The vision labeler sometimes tags several distinct sidebar cells with the
     same shape word (``Rectangle_Tool_1 … _6``). This keeps only the canonical
-    (top-left-most) icon of each shape, rewrites state/ui_graph.json, and
-    refreshes the live catalog so the change shows without a restart.
+    (top-left-most) icon of each shape, rewrites the active interface's
+    ``state/ui_graph.<domain>.json``, and refreshes the live catalog so the
+    change shows without a restart.
     """
     diff = ui_state.dedupe_ui_state()
     logger.info("[api] deduped captured icons: %s", diff)
@@ -762,14 +764,15 @@ def dedupe_ui_graph() -> UiGraphResult:
 
 
 # ===========================================================================
-# Explore — interactive sidebar detection + labeling (builds ui_graph.json)
+# Explore — interactive sidebar detection + labeling (builds the ui_graph)
 # ===========================================================================
 #
 # Workflow:
 #   1. POST /api/explore/detect  → screenshot + CV → working set of icon boxes
 #   2. (frontend) user edits/adds/removes boxes, edits labels
 #   3. POST /api/explore/label   → VLM labels requested icons (uses screenshot)
-#   4. POST /api/explore/save    → writes the final icon set to ui_graph.json
+#   4. POST /api/explore/save    → writes the icons to the active interface's
+#                                  ui_graph.<domain>.json
 #
 # The frontend is the source of truth for the working icon set after step 1.
 # Label and Save both receive the current icon list in the request body so
@@ -782,11 +785,26 @@ _explore_logical_w: int = 0
 _explore_logical_h: int = 0
 
 
-def _get_domain_label_prompt() -> Optional[str]:
-    """Load the active domain's VLM label prompt, or None for generic fallback."""
-    import importlib
+def _resolve_explore_domain(domain: Optional[str]) -> str:
+    """Pick the interface an Explore request targets.
+
+    Prefers the explicit ``domain`` the frontend sends (it owns the active
+    Interface dropdown), falling back to the server's active domain. Rejects
+    anything not in ``available_domains`` so a typo can't create a junk
+    ``ui_graph.<typo>.json``.
+    """
+    d = domain or config.domain()
+    if d not in config.available_domains():
+        raise HTTPException(
+            400, f"Unknown interface '{d}'. Available: {config.available_domains()}")
+    return d
+
+
+def _get_domain_label_prompt(domain: Optional[str] = None) -> Optional[str]:
+    """Load an interface's VLM label prompt, or None for the generic fallback."""
+    name = domain or config.domain()
     try:
-        mod = importlib.import_module(f"domains.{config.domain()}.perception")
+        mod = importlib.import_module(f"domains.{name}.perception")
         return getattr(mod, "LABEL_PROMPT", None)
     except ImportError:
         return None
@@ -811,6 +829,7 @@ class DetectResult(BaseModel):
 class LabelBody(BaseModel):
     icons: List[ExploreIcon]                  # current frontend working set
     indices: Optional[List[int]] = None       # None = label all
+    domain: Optional[str] = None              # interface to label for (prompt)
     countdown: int = 0
 
 
@@ -820,6 +839,7 @@ class LabelResult(BaseModel):
 
 class SaveExploreBody(BaseModel):
     icons: List[ExploreIcon]
+    domain: Optional[str] = None              # interface to write (defaults active)
 
 
 class SaveExploreResult(BaseModel):
@@ -891,12 +911,13 @@ def explore_label(body: LabelBody) -> LabelResult:
 
     _countdown(body.countdown)
 
+    target = _resolve_explore_domain(body.domain)
     all_icons = [ic.model_dump() for ic in body.icons]
     indices = body.indices if body.indices is not None else list(range(len(all_icons)))
     valid_indices = [i for i in indices if 0 <= i < len(all_icons)]
     subset = [all_icons[i] for i in valid_indices]
 
-    prompt = _get_domain_label_prompt()
+    prompt = _get_domain_label_prompt(target)
     labeled_subset = _label(_explore_screenshot, subset, label_prompt=prompt)
 
     result = list(all_icons)
@@ -912,17 +933,95 @@ def explore_label(body: LabelBody) -> LabelResult:
 
 @app.post("/api/explore/save", response_model=SaveExploreResult)
 def explore_save(body: SaveExploreBody) -> SaveExploreResult:
-    """Persist the working icon set to ui_graph.json and reload the live catalog.
+    """Persist the working icon set to the chosen interface's ui_graph + reload.
 
     Writes the icons the frontend sends (with whatever labels they have) to
-    ``state/ui_graph.json`` via the same :func:`save_ui_state` path used by the
-    notebook-based explorer, then reloads ``_G["UI_Elements"]`` so subsequent
-    ``place_shape`` dispatches use the updated positions without a server restart.
+    ``state/ui_graph.<domain>.json`` — where ``domain`` is the interface the
+    Explore panel is showing (``body.domain``), NOT a server-side guess — so a
+    capture always lands on the interface the user is actually looking at.
+    Then reloads ``_G["UI_Elements"]`` from the active domain so subsequent
+    ``place_shape`` dispatches pick up the change without a server restart.
     """
     from core.state.ui_graph import save_ui_state
 
+    target = _resolve_explore_domain(body.domain)
     icons_dicts = [ic.model_dump() for ic in body.icons]
-    out_path = save_ui_state(icons_dicts)
-    _G["UI_Elements"] = config.ui_graph().get("UI_Elements", {})
-    logger.info("[explore/save] saved %d icons → %s", len(icons_dicts), out_path)
+    out_path = save_ui_state(icons_dicts, target)
+    # _G mirrors the ACTIVE domain; refresh it (a no-op for _G when the user
+    # saved a non-active interface, which the UI doesn't currently allow).
+    if target == config.domain():
+        _G["UI_Elements"] = config.ui_graph(target).get("UI_Elements", {})
+    logger.info("[explore/save] saved %d icons → %s (interface=%s)",
+                len(icons_dicts), out_path, target)
     return SaveExploreResult(saved=len(icons_dicts), path=os.path.basename(out_path))
+
+
+# ===========================================================================
+# Interface (domain) switching — one captured ui_graph per application
+# ===========================================================================
+#
+# The active interface governs (a) which ``state/ui_graph.<domain>.json`` icon
+# set is live and (b) which ``domains.<name>`` plugin (tools + perception) is
+# used. It starts from config.json's "domain" and is switched at runtime via
+# the frontend's top-right Interface dropdown. Switching swaps the live UI
+# graph and resets the canvas/scene-graph (a different app = a different
+# canvas). Tools for the new interface are imported on first switch.
+
+
+class DomainsResult(BaseModel):
+    active: str
+    available: List[str]
+
+
+class SetDomainBody(BaseModel):
+    domain: str
+
+
+class SetDomainResult(BaseModel):
+    active: str
+    available: List[str]
+    tool_count: int
+
+
+def _switch_domain(name: str) -> Dict[str, Any]:
+    """Make *name* the active interface and reload its per-domain state.
+
+    - Points :func:`config.domain` at *name* (so ui_graph + plugin lookups
+      resolve to it).
+    - Imports ``domains.<name>.tools`` if present (registers its tools); a
+      missing plugin is fine for interfaces still being built (e.g. capturing
+      iMovie's ui_graph before its tools exist).
+    - Swaps ``_G["UI_Elements"]`` to the new interface's captured icons and
+      resets the scene graph + selection (different app ⇒ different canvas).
+    """
+    if name not in config.available_domains():
+        raise HTTPException(
+            400, f"Unknown interface '{name}'. Available: {config.available_domains()}")
+
+    config.set_domain(name)
+    try:
+        importlib.import_module(f"domains.{name}.tools")
+    except ImportError:
+        logger.warning("[api] interface '%s' has no tools plugin yet "
+                       "(ui_graph capture still works)", name)
+
+    _G["UI_Elements"] = config.ui_graph(name).get("UI_Elements", {})
+    _G["scene_graph"] = sg.reset()
+    _G["selected_handles"] = None
+    logger.info("[api] switched interface → %s (%d tools, %d icons)",
+                name, len(TOOL_CATALOG), len(_G["UI_Elements"]))
+    return {"active": name, "available": config.available_domains(),
+            "tool_count": len(TOOL_CATALOG)}
+
+
+@app.get("/api/domains", response_model=DomainsResult)
+def get_domains() -> DomainsResult:
+    """List the interfaces the user can switch between + the active one."""
+    return DomainsResult(active=config.domain(), available=config.available_domains())
+
+
+@app.post("/api/domain", response_model=SetDomainResult)
+def switch_domain(body: SetDomainBody) -> SetDomainResult:
+    """Switch the active interface (see :func:`_switch_domain`)."""
+    out = _switch_domain(body.domain)
+    return SetDomainResult(**out)

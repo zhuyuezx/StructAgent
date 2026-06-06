@@ -1,8 +1,8 @@
 """
 Config — Centralized configuration loader.
 
-Reads ``config.json`` (architectural settings) and ``state/ui_graph.json``
-(persistent UI graph) from the project root.
+Reads ``config.json`` (architectural settings) and the active interface's
+``state/ui_graph.<domain>.json`` (persistent UI graph) from the project root.
 
 Configuration values are available in two equivalent ways:
 
@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Locate files relative to this file (project_root/core/config.py)
@@ -43,11 +43,12 @@ _cfg: Dict[str, Any] = _load(_CONFIG_PATH)
 
 def reload() -> None:
     """Re-read config.json and rebuild namespace objects."""
-    global _cfg, llm, executor, explorer
+    global _cfg, llm, executor, explorer, _ACTIVE_DOMAIN
     _cfg = _load(_CONFIG_PATH)
     llm = _build_llm(_cfg)
     executor = _build_executor(_cfg)
     explorer = _build_explorer(_cfg)
+    _ACTIVE_DOMAIN = _cfg.get("domain", "drawio")
 
 
 # ===========================================================================
@@ -162,35 +163,77 @@ def scene_graph_dir() -> str:
     return d
 
 
-def ui_graph_path() -> str:
-    return os.path.join(state_dir(), _cfg["paths"].get("ui_graph_file", "ui_graph.json"))
+def ui_graph_path(domain: Optional[str] = None) -> str:
+    """Path of the captured UI graph for an interface.
+
+    Each interface keeps its OWN icon set in ``state/ui_graph.<domain>.json``
+    (e.g. ``ui_graph.drawio.json``, ``ui_graph.imovie.json``). Defaults to the
+    active domain. This is what lets the Explore tab + ``place_shape`` target
+    different applications without their sidebars colliding.
+    """
+    d = domain or _ACTIVE_DOMAIN
+    return os.path.join(state_dir(), f"ui_graph.{d}.json")
 
 
 # ---------------------------------------------------------------------------
-# Domain plugin
+# Domain plugin (active interface — runtime-switchable)
 # ---------------------------------------------------------------------------
+
+# The active domain starts from config.json's "domain" but can be switched at
+# runtime via set_domain() (the frontend's Interface dropdown). It governs both
+# which ``domains.<name>`` plugin is used AND which ui_graph file is read.
+_ACTIVE_DOMAIN: str = _cfg.get("domain", "drawio")
+
 
 def domain() -> str:
-    """Active domain plugin name (e.g. 'drawio')."""
-    return _cfg.get("domain", "drawio")
+    """Active domain/interface name (e.g. 'drawio'). Runtime-switchable."""
+    return _ACTIVE_DOMAIN
+
+
+def set_domain(name: str) -> None:
+    """Switch the active domain/interface at runtime.
+
+    Affects ``ui_graph_path`` / ``ui_graph`` (which icon set is read) and the
+    ``domains.<name>`` plugin lookup. The caller is responsible for reloading
+    any per-domain state it caches (tools, the live UI graph) — see
+    ``core.api._switch_domain``.
+    """
+    global _ACTIVE_DOMAIN
+    _ACTIVE_DOMAIN = name
+
+
+def available_domains() -> List[str]:
+    """Interfaces the user can switch between.
+
+    Read from config.json's ``"interfaces"`` list (user-editable, so an
+    in-progress interface like 'imovie' can appear before its plugin exists).
+    Falls back to just the active domain when unset.
+    """
+    listed = _cfg.get("interfaces")
+    if listed:
+        return list(listed)
+    return [_ACTIVE_DOMAIN]
 
 
 # ---------------------------------------------------------------------------
-# UI graph (from state/ui_graph.json)
+# UI graph (from state/ui_graph.<domain>.json)
 # ---------------------------------------------------------------------------
 
-def load_ui_state() -> Dict[str, Any]:
-    """Load the persisted UI graph file. Returns {} if missing."""
-    path = ui_graph_path()
+def load_ui_state(domain: Optional[str] = None) -> Dict[str, Any]:
+    """Load an interface's persisted UI graph file. Returns {} if missing.
+
+    Defaults to the active domain; pass ``domain`` to read another interface.
+    """
+    path = ui_graph_path(domain)
     if not os.path.exists(path):
         return {}
     return _load(path)
 
 
-def ui_graph() -> Dict[str, Any]:
+def ui_graph(domain: Optional[str] = None) -> Dict[str, Any]:
     """
-    Return the runtime UI graph dict, merging persisted UI state with
-    config.json calibration data.
+    Return the runtime UI graph dict for an interface, merging persisted UI
+    state with config.json calibration data. Defaults to the active domain.
 
     Schema (Phase 0 — preserved from prior layout):
         {
@@ -199,7 +242,7 @@ def ui_graph() -> Dict[str, Any]:
           "Canvas_Edges": [...]
         }
     """
-    state = load_ui_state()
+    state = load_ui_state(domain)
     cal = _cfg.get("calibration", {})
     return {
         "UI_Elements": state.get("ui_elements", {}),

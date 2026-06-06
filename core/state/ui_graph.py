@@ -29,9 +29,12 @@ def _icon_name(label: str) -> str:
     return base if base.endswith("_Tool") else f"{base}_Tool"
 
 
-def save_ui_state(icons: List[Dict[str, Any]]) -> str:
+def save_ui_state(icons: List[Dict[str, Any]], domain: str | None = None) -> str:
     """
     Persist a list of detected+labeled icons as the UI state file.
+
+    Writes to the active interface's ``state/ui_graph.<domain>.json`` (or the
+    one named by ``domain``), so each interface keeps its own icon set.
 
     One icon per shape: the vision labeler often tags several *distinct*
     sidebar cells with the same shape word (e.g. multiple cells read as
@@ -41,7 +44,7 @@ def save_ui_state(icons: List[Dict[str, Any]]) -> str:
     order), where the basic shape of each kind appears first. Returns the
     output file path.
     """
-    out_path = config.ui_graph_path()
+    out_path = config.ui_graph_path(domain)
 
     # Palette reading order (top→bottom, left→right) so the canonical (basic)
     # icon of each shape wins.
@@ -67,27 +70,28 @@ def save_ui_state(icons: List[Dict[str, Any]]) -> str:
     return out_path
 
 
-def dedupe_ui_state() -> Dict[str, int]:
+def dedupe_ui_state(domain: str | None = None) -> Dict[str, int]:
     """Collapse the *already-recorded* ui_elements to one canonical icon per
     shape, applying the same rule :func:`save_ui_state` now enforces.
 
     For data captured before that rule existed (where duplicates were suffixed
     ``Rectangle_Tool_1 … _6``). Recovers each element's shape from its name,
-    then re-saves through :func:`save_ui_state`. Returns
+    then re-saves through :func:`save_ui_state`. Operates on the active
+    interface (or the one named by ``domain``). Returns
     ``{"before", "after", "dropped"}``.
     """
-    elements = config.load_ui_state().get("ui_elements", {})
+    elements = config.load_ui_state(domain).get("ui_elements", {})
     icons = [
         {"label": _TOOL_SUFFIX_RE.sub("", name) or name,
          "x": v["x"], "y": v["y"], "w": v["w"], "h": v["h"]}
         for name, v in elements.items()
     ]
     before = len(elements)
-    save_ui_state(icons)
-    after = len(config.load_ui_state().get("ui_elements", {}))
+    save_ui_state(icons, domain)
+    after = len(config.load_ui_state(domain).get("ui_elements", {}))
     return {"before": before, "after": after, "dropped": before - after}
 
 
-def load_ui_state() -> Dict[str, Any]:
+def load_ui_state(domain: str | None = None) -> Dict[str, Any]:
     """Direct passthrough to ``config.load_ui_state()`` for convenience."""
-    return config.load_ui_state()
+    return config.load_ui_state(domain)

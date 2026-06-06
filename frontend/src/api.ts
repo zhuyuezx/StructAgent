@@ -7,6 +7,7 @@ import type {
   CriticResult,
   DetectBody,
   DetectResult,
+  DomainsResult,
   LabelBody,
   LabelResult,
   PlanBody,
@@ -23,6 +24,8 @@ import type {
   SaveToolBody,
   SceneGraph,
   SegmentResult,
+  SetDomainBody,
+  SetDomainResult,
   ToolDetail,
   ToolSummary,
   UiGraphResult,
@@ -131,6 +134,13 @@ export const api = {
     }),
   exploreSave: (body: SaveExploreBody) =>
     request<SaveExploreResult>('/explore/save', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  // Interface (domain) switching
+  getDomains: () => request<DomainsResult>('/domains'),
+  setDomain: (body: SetDomainBody) =>
+    request<SetDomainResult>('/domain', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
