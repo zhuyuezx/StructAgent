@@ -1,0 +1,46 @@
+flowchart TB
+    App[Target App · draw.io / iMovie<br/>closed UI — no API]
+
+    subgraph P5["P5 · Portable, human-in-the-loop Studio"]
+        User([User · Studio])
+        Detector[Detector · OpenCV]
+        Labeller[Labeller]
+    end
+
+    subgraph P1["P1 · Symbolic state over pixels"]
+        UIGraph[(UI Graph · per interface)]
+        SceneGraph[(Scene Graph · by id, not pixels)]
+    end
+
+    subgraph P2["P2 · Self-growing tool tree"]
+        ToolTree[Tool Tree · L0/L1/L2 · auto-promote]
+    end
+
+    subgraph P3["P3 · Plan once, run deterministically"]
+        Planner[Planner · full plan in 1 call]
+        Orchestrator[Orchestrator · deterministic run]
+    end
+
+    subgraph P4["P4 · Checkpoint verify &amp; repair"]
+        Critic[Critic · verify from screenshot]
+    end
+
+    User -->|capture| Detector
+    Detector -->|boxes| Labeller
+    Labeller -->|labels| UIGraph
+
+    User -->|task| Planner
+    SceneGraph --> Planner
+    ToolTree --> Planner
+    Planner -->|plan| Orchestrator
+    Orchestrator -->|dispatch| ToolTree
+    UIGraph -->|coords| ToolTree
+    ToolTree -->|mouse &amp; keyboard| App
+    App -->|reconcile| SceneGraph
+
+    Orchestrator -->|screenshot| Critic
+    Critic -->|verdict| Orchestrator
+    Critic -.->|on fail: repair| Planner
+
+    classDef agent fill:#2E6FB5,stroke:#1b4d80,color:#fff;
+    class Labeller,Planner,Orchestrator,Critic agent;

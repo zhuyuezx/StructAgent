@@ -1,0 +1,100 @@
+{
+  "name": "connect_four_corners",
+  "description": "Place four rectangles and move to four corners, and label them from 1 to 4. Then connect 1 to 2, 2, to 3, 3 to 4, and 4 to 1 to form a cycle.",
+  "params": [],
+  "needs_ui_graph": true,
+  "steps": [
+    {
+      "tool": "place_and_label",
+      "params": {
+        "tool_name": "Rectangle_Tool",
+        "label": "1"
+      }
+    },
+    {
+      "tool": "move_shape",
+      "params": {
+        "direction": "nw",
+        "amount": 200
+      }
+    },
+    {
+      "tool": "place_and_label",
+      "params": {
+        "tool_name": "Rectangle_Tool",
+        "label": "2"
+      }
+    },
+    {
+      "tool": "move_shape",
+      "params": {
+        "direction": "ne",
+        "amount": 200
+      }
+    },
+    {
+      "tool": "place_and_label",
+      "params": {
+        "tool_name": "Rectangle_Tool",
+        "label": "3"
+      }
+    },
+    {
+      "tool": "move_shape",
+      "params": {
+        "direction": "se",
+        "amount": 200
+      }
+    },
+    {
+      "tool": "place_and_label",
+      "params": {
+        "tool_name": "Rectangle_Tool",
+        "label": "4"
+      }
+    },
+    {
+      "tool": "move_shape",
+      "params": {
+        "direction": "sw",
+        "amount": 200
+      }
+    },
+    {
+      "tool": "connect_shapes",
+      "params": {
+        "source_id": "1",
+        "target_id": "2",
+        "source_anchor": "e"
+      }
+    },
+    {
+      "tool": "connect_shapes",
+      "params": {
+        "source_id": "2",
+        "target_id": "3",
+        "source_anchor": "s"
+      }
+    },
+    {
+      "tool": "connect_shapes",
+      "params": {
+        "source_id": "3",
+        "target_id": "4",
+        "source_anchor": "w"
+      }
+    },
+    {
+      "tool": "connect_shapes",
+      "params": {
+        "source_id": "4",
+        "target_id": "1",
+        "source_anchor": "n"
+      }
+    },
+    {
+      "tool": "click_empty_canvas",
+      "params": {}
+    }
+  ]
+}
