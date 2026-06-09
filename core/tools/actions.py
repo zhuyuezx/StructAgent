@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional
 
 from core import config
 from core.state import scene_graph as _sg
+from core.target import manager as target_manager
 from core.tools.atoms import atom_click_at, atom_drag, atom_hotkey, atom_press
 from core.tools.reconcile import get_scene, save_scene, scan_and_reconcile
 from core.tools.registry import resolve_node
@@ -76,7 +77,7 @@ def _resolve_node_xy(ui_graph: Dict[str, Any], ref: str) -> tuple:
 
 def _fn_click_empty_canvas(ui_graph: Optional[Dict[str, Any]] = None) -> dict:
     """Click the configured empty-canvas point and clear any selection."""
-    x, y = config.empty_canvas_point()
+    x, y = target_manager.canvas_center()
     logger.info("  [L1] click_empty_canvas → (%d, %d)", x, y)
     atom_click_at(x, y)
     if ui_graph is not None:

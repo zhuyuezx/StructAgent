@@ -70,3 +70,15 @@ def screenshot_scale() -> float:
         return float(ctrl.screenshot_scale())
     except Exception:
         return float(config.screen_scale())
+
+
+def canvas_center() -> tuple[int, int]:
+    """Best available center point for focusing/dragging on the target canvas."""
+    ctrl = capture_controller()
+    try:
+        x, y = ctrl.canvas_center()
+        if x or y:
+            return int(x), int(y)
+    except Exception:
+        pass
+    return config.empty_canvas_point()

@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 
 from core import config
 from core.state import scene_graph as _sg
+from core.target import manager as target_manager
 from core.tools.atoms import atom_click_at, atom_drag, atom_move_to, atom_press
 from core.tools.reconcile import (
     get_scene, save_scene,
@@ -120,7 +121,7 @@ def _fn_place_shape(ui_graph: Dict[str, Any], tool_name: str) -> dict:
     # This happens whenever the user clicked the IDE's "Run cell" button to
     # start this cell, stealing focus from draw.io.  A canvas pre-click costs
     # one deselect (harmless here) and guarantees the sidebar click registers.
-    _fcx, _fcy = config.empty_canvas_point()
+    _fcx, _fcy = target_manager.canvas_center()
     atom_click_at(_fcx, _fcy)
     time.sleep(0.2)
 
@@ -362,10 +363,10 @@ def _fn_place_label_and_move(
     if bbox:
         gx, gy = bbox[0] + bbox[2] // 2, bbox[1] + bbox[3] // 2
     else:
-        # New draw.io shapes are dropped at the calibrated empty-canvas point.
+        # New draw.io shapes are dropped near the visible canvas center.
         # This fallback lets the location-aware compound move immediately even
         # when handle detection has not yet reconciled a bbox.
-        gx, gy = config.empty_canvas_point()
+        gx, gy = target_manager.canvas_center()
 
     dx, dy = _RESIZE_DIRECTION_VECTOR[direction]
     tx, ty = int(gx + dx * amount), int(gy + dy * amount)

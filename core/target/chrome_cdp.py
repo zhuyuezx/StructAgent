@@ -126,6 +126,46 @@ class ChromeCdpController(CaptureController, InputController):
     def screenshot_scale(self) -> float:
         return self._last_screenshot_scale
 
+    def canvas_center(self) -> Tuple[int, int]:
+        expr = r"""
+(() => {
+  const selectors = [
+    '.geDiagramContainer',
+    '.geDiagramBackdrop',
+    '.geEditor',
+    '.mxGraph',
+    '#graph'
+  ];
+  const candidates = [];
+  for (const sel of selectors) {
+    for (const el of document.querySelectorAll(sel)) candidates.push(el);
+  }
+  for (const el of candidates) {
+    const r = el.getBoundingClientRect();
+    if (r.width >= 300 && r.height >= 200) {
+      return {
+        x: Math.round(r.left + r.width / 2),
+        y: Math.round(r.top + r.height / 2),
+        width: Math.round(r.width),
+        height: Math.round(r.height)
+      };
+    }
+  }
+  return {
+    x: Math.round(window.innerWidth / 2),
+    y: Math.round(window.innerHeight / 2),
+    width: Math.round(window.innerWidth),
+    height: Math.round(window.innerHeight)
+  };
+})()
+"""
+        result = self._call("Runtime.evaluate", {
+            "expression": expr,
+            "returnByValue": True,
+        })
+        value = ((result.get("result") or {}).get("value") or {})
+        return int(value.get("x") or 0), int(value.get("y") or 0)
+
     @staticmethod
     def _png_size(image: bytes) -> Tuple[int, int]:
         if len(image) < 24 or image[:8] != b"\x89PNG\r\n\x1a\n":
@@ -171,6 +211,7 @@ class ChromeCdpController(CaptureController, InputController):
                 "title": tab.get("title"),
                 "url": tab.get("url"),
                 "screen_scale": self._last_screenshot_scale,
+                "canvas_center": list(self.canvas_center()),
                 "viewport": {
                     "width": viewport.get("clientWidth"),
                     "height": viewport.get("clientHeight"),

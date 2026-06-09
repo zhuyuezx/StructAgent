@@ -12,6 +12,7 @@ A generic fallback is used when no prompt is supplied.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 import cv2
@@ -32,6 +33,108 @@ _GENERIC_LABEL_PROMPT = (
 # ---------------------------------------------------------------------------
 # LLM labeling
 # ---------------------------------------------------------------------------
+
+_DRAWIO_LABELS = {
+    "Rectangle",
+    "Rounded_Rectangle",
+    "Ellipse",
+    "Circle",
+    "Diamond",
+    "Triangle",
+    "Arrow",
+    "Text",
+    "Cylinder",
+    "Cloud",
+    "Hexagon",
+    "Parallelogram",
+    "Table",
+    "Box",
+    "Wave",
+    "Document",
+    "Person",
+    "Speech_Bubble",
+}
+
+_LABEL_ALIASES = {
+    "roundedrectangle": "Rounded_Rectangle",
+    "rounded_rect": "Rounded_Rectangle",
+    "round_rectangle": "Rounded_Rectangle",
+    "oval": "Ellipse",
+    "rhombus": "Diamond",
+    "database": "Cylinder",
+    "data_store": "Cylinder",
+    "speechbubble": "Speech_Bubble",
+    "speech_balloon": "Speech_Bubble",
+    "callout": "Speech_Bubble",
+    "actor": "Person",
+}
+
+_BAD_PREFIXES = (
+    "the_user_wants",
+    "i_need",
+    "i_should",
+    "this_image",
+    "the_image",
+    "it_looks",
+    "it_seems",
+    "based_on",
+)
+
+
+def _normalize_label_token(text: str) -> str:
+    token = text.strip().strip(".,:;!?\"'`[](){}")
+    token = re.sub(r"[\s\-]+", "_", token)
+    token = re.sub(r"[^A-Za-z0-9_]", "", token)
+    token = re.sub(r"_+", "_", token).strip("_")
+    return token
+
+
+def _canonical_label(token: str) -> Optional[str]:
+    if not token:
+        return None
+    compact = token.lower().replace("_", "")
+    alias_key = token.lower()
+    if alias_key in _LABEL_ALIASES:
+        return _LABEL_ALIASES[alias_key]
+    if compact in _LABEL_ALIASES:
+        return _LABEL_ALIASES[compact]
+    for label in _DRAWIO_LABELS:
+        if compact == label.lower().replace("_", ""):
+            return label
+    return None
+
+
+def _parse_label_response(raw: str) -> Optional[str]:
+    """Extract one usable icon label from a VLM response."""
+    text = re.sub(r"<think>.*?</think>", " ", raw, flags=re.IGNORECASE | re.DOTALL)
+    text = text.strip()
+    if not text:
+        return None
+
+    first_line = text.splitlines()[0]
+    direct = _normalize_label_token(first_line)
+    direct_word_count = len(re.findall(r"[A-Za-z][A-Za-z0-9_-]*", first_line))
+    if direct.lower().startswith(_BAD_PREFIXES) or len(direct) > 40 or direct_word_count > 2:
+        direct = ""
+    canonical = _canonical_label(direct)
+    if canonical:
+        return canonical
+    if direct and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,39}", direct):
+        return direct
+
+    for match in re.finditer(r"[A-Za-z][A-Za-z0-9_\- ]{1,40}", text):
+        candidate = _normalize_label_token(match.group(0))
+        canonical = _canonical_label(candidate)
+        if canonical:
+            return canonical
+    words = [_normalize_label_token(w) for w in re.findall(r"[A-Za-z][A-Za-z0-9_-]*", text)]
+    for size in (2, 1):
+        for i in range(0, max(0, len(words) - size + 1)):
+            candidate = "_".join(w for w in words[i:i + size] if w)
+            canonical = _canonical_label(candidate)
+            if canonical:
+                return canonical
+    return None
 
 def label_icons(
     screenshot_path: str,
@@ -88,11 +191,20 @@ def label_icons(
         _, buf = cv2.imencode(".png", crop)
         img_bytes = buf.tobytes()
 
-        messages = [{"role": "user", "content": prompt}]
-
         label = None
         for attempt in range(1, max_retries + 1):
             try:
+                strict_prompt = (
+                    f"{prompt}\n\n"
+                    "Return exactly ONE label token and nothing else. "
+                    "Do not explain. Do not mention the user or your reasoning."
+                )
+                if attempt > 1:
+                    strict_prompt += (
+                        "\nYour previous answer was not a valid label. "
+                        "Answer with one shape name only."
+                    )
+                messages = [{"role": "user", "content": strict_prompt}]
                 import os
                 import tempfile
                 fd, crop_path = tempfile.mkstemp(suffix=".png")
@@ -110,8 +222,10 @@ def label_icons(
                         os.unlink(crop_path)
                     except OSError:
                         pass
-                raw = resp.content.strip().split("\n")[0]
-                label = raw.strip(".,!\"'` ").replace(" ", "_")
+                raw = resp.content.strip()
+                label = _parse_label_response(raw)
+                if label is None:
+                    raise ValueError(f"invalid label response: {raw[:120]!r}")
                 break
             except TimeoutError:
                 logger.warning("  Icon %2d: ⏱ timeout (%ss) — "

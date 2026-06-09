@@ -275,6 +275,7 @@ class TargetStatusResult(BaseModel):
     viewport: Optional[Dict[str, Any]] = None
     mode: Optional[str] = None
     screen_scale: Optional[float] = None
+    canvas_center: Optional[List[int]] = None
     error: Optional[str] = None
 
 

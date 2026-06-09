@@ -21,6 +21,10 @@ class CaptureController:
         """Screenshot pixels per input-coordinate point."""
         return 1.0
 
+    def canvas_center(self) -> Tuple[int, int]:
+        """Best known center of the interactive canvas/input area."""
+        return (0, 0)
+
 
 class InputController:
     name = "base"

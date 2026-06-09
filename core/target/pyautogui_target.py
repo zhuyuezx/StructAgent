@@ -25,10 +25,14 @@ class PyAutoGuiController(CaptureController, InputController):
             "connected": True,
             "mode": "full_screen",
             "screen_scale": float(config.screen_scale()),
+            "canvas_center": list(self.canvas_center()),
         }
 
     def screenshot_scale(self) -> float:
         return float(config.screen_scale())
+
+    def canvas_center(self) -> tuple[int, int]:
+        return config.empty_canvas_point()
 
     def move_to(self, x: int, y: int) -> None:
         pyautogui.moveTo(x, y)
