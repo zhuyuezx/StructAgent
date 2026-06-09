@@ -1,6 +1,6 @@
 {
   "name": "place_and_label",
-  "description": "Place a shape, label it, then deselect.",
+  "description": "Place a shape at the fixed draw.io drop point, label it, then deselect. Only use when the shape may remain at the default drop point. For multiple free-standing shapes, use place_label_and_move so each shape has an explicit offset.",
   "params": [
     "tool_name",
     "label"

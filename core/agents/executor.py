@@ -22,9 +22,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-import ollama
-
 from core import config
+from core import llm
 from core.agents._common import (
     active_selection_summary,
     element_summary,
@@ -262,7 +261,7 @@ def infer(
         Dict with keys: ``reasoning``, ``tool``, ``params``.
     """
     use_screenshot = screenshot_path is not None
-    model = config.llm_model()
+    model = config.executor_model_config().model
     prompt = build_prompt(ui_graph, use_screenshot=use_screenshot)
 
     messages: List[Dict[str, Any]] = [{"role": "system", "content": prompt}]
@@ -270,15 +269,17 @@ def infer(
         messages.extend(history)
 
     user_msg: Dict[str, Any] = {"role": "user", "content": f"Task: {task}"}
-    if use_screenshot:
-        with open(screenshot_path, "rb") as f:
-            user_msg["images"] = [f.read()]
     messages.append(user_msg)
 
     mode = "screenshot+sg" if use_screenshot else "text-only"
     logger.info("Querying %s (%s) …", model, mode)
-    response = ollama.chat(model=model, messages=messages)
-    raw = response["message"]["content"]
+    response = llm.chat(
+        purpose="executor",
+        messages=messages,
+        images=[screenshot_path] if use_screenshot else None,
+        response_format="json_object",
+    )
+    raw = response.content
     logger.debug("Raw response:\n%s", raw)
 
     result = parse_response(raw)

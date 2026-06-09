@@ -108,6 +108,7 @@ export interface PlanBody {
 export interface PlanResult {
   reasoning: string;
   steps: PlanStep[];
+  raw_response?: string;
 }
 
 export interface ChatMessage {
@@ -281,4 +282,25 @@ export interface SetDomainResult {
   active: string;
   available: string[];
   tool_count: number;
+}
+
+// === Target backend ========================================================
+
+export interface TargetStatusResult {
+  backend: string;
+  connected: boolean;
+  title?: string | null;
+  url?: string | null;
+  viewport?: { width?: number | null; height?: number | null } | null;
+  mode?: string | null;
+  error?: string | null;
+}
+
+export interface TargetScreenshotBody {
+  filename?: string;
+}
+
+export interface TargetScreenshotResult {
+  screenshot: string;
+  path: string;
 }

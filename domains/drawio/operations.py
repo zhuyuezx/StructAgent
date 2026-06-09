@@ -332,6 +332,73 @@ def _fn_move_shape(
             "from": [gx, gy], "to": [tx, ty]}
 
 
+def _fn_place_label_and_move(
+    ui_graph: Dict[str, Any], tool_name: str, label: str,
+    direction: str, amount: int,
+) -> dict:
+    """Place, label, move the newly-created selected shape, then deselect."""
+    direction = _norm_dir(direction)
+    if direction not in _RESIZE_DIRECTION_VECTOR:
+        return {"status": "error", "tool": "place_label_and_move",
+                "error": f"unknown direction '{direction}'"}
+
+    placed = _fn_place_shape(ui_graph, tool_name)
+    if placed.get("status") != "ok":
+        return {**placed, "tool": "place_label_and_move"}
+    target_id = placed.get("scene_object_id")
+
+    typed = _fn_type_label(label, ui_graph=ui_graph)
+    if typed.get("status") != "ok":
+        return {**typed, "tool": "place_label_and_move"}
+
+    escaped = _fn_press_escape(ui_graph=ui_graph)
+    if escaped.get("status") != "ok":
+        return {**escaped, "tool": "place_label_and_move"}
+
+    sg = get_scene(ui_graph)
+    obj = _sg.find_by_id(sg, target_id) if target_id else _sg.get_selected(sg)
+    h = ui_graph.get("selected_handles") or {}
+    bbox = (obj or {}).get("bbox") or h.get("shape_bbox")
+    if bbox:
+        gx, gy = bbox[0] + bbox[2] // 2, bbox[1] + bbox[3] // 2
+    else:
+        # New draw.io shapes are dropped at the calibrated empty-canvas point.
+        # This fallback lets the location-aware compound move immediately even
+        # when handle detection has not yet reconciled a bbox.
+        gx, gy = config.empty_canvas_point()
+
+    dx, dy = _RESIZE_DIRECTION_VECTOR[direction]
+    tx, ty = int(gx + dx * amount), int(gy + dy * amount)
+    logger.info("  [L2] place_label_and_move('%s', '%s', %s, %d) drag (%d,%d) -> (%d,%d)",
+                tool_name, label, direction, amount, gx, gy, tx, ty)
+    atom_drag(gx, gy, tx, ty)
+    time.sleep(0.4)
+    if target_id:
+        width = int(bbox[2]) if bbox else 80
+        height = int(bbox[3]) if bbox else 40
+        _sg.update_object_bbox(
+            sg, target_id,
+            [int(tx - width // 2), int(ty - height // 2), width, height],
+            op_name=f"place_label_and_move:{direction}",
+        )
+        _sg.set_selected(sg, target_id)
+        save_scene(ui_graph)
+    atom_press("Escape")
+    time.sleep(0.1)
+    dispatch_result = {
+        "status": "ok",
+        "tool": "place_label_and_move",
+        "tool_name": tool_name,
+        "label": label,
+        "direction": direction,
+        "amount": amount,
+        "scene_object_id": target_id,
+        "from": [gx, gy],
+        "to": [tx, ty],
+    }
+    return dispatch_result
+
+
 def _fn_hover_object(ui_graph: Dict[str, Any], object_id: str) -> dict:
     sg = get_scene(ui_graph)
     obj = _sg.find_by_id(sg, object_id)

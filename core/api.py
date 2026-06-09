@@ -22,6 +22,9 @@ Endpoints
     GET    /api/scene-graph                  current scene graph
     POST   /api/scene-graph/reset            reset scene graph
     GET    /api/ui-graph                     current UI graph (sidebar elements)
+    GET    /api/target/status                current screenshot/input target
+    POST   /api/target/refresh               rescan configured target
+    POST   /api/target/screenshot            capture configured target
     GET    /api/health                       liveness probe
 """
 
@@ -187,6 +190,7 @@ class PlanResult(BaseModel):
     reasoning: str = ""
     # steps are {tool, params, checkpoint?, reasoning?} — kept loose on purpose.
     steps: List[Dict[str, Any]] = Field(default_factory=list)
+    raw_response: str = ""
 
 
 class ChatPlanBody(BaseModel):
@@ -261,6 +265,26 @@ class CriticBody(BaseModel):
 class CriticResult(BaseModel):
     passed: bool
     reasoning: str = ""
+
+
+class TargetStatusResult(BaseModel):
+    backend: str
+    connected: bool
+    title: Optional[str] = None
+    url: Optional[str] = None
+    viewport: Optional[Dict[str, Any]] = None
+    mode: Optional[str] = None
+    screen_scale: Optional[float] = None
+    error: Optional[str] = None
+
+
+class TargetScreenshotBody(BaseModel):
+    filename: str = "_target.png"
+
+
+class TargetScreenshotResult(BaseModel):
+    screenshot: str
+    path: str
 
 
 # ===========================================================================
@@ -350,6 +374,26 @@ def health() -> Dict[str, Any]:
         "domain": config.domain(),
         "tool_count": len(TOOL_CATALOG),
     }
+
+
+@app.get("/api/target/status", response_model=TargetStatusResult)
+def target_status() -> TargetStatusResult:
+    from core.target import manager as target_manager
+    return TargetStatusResult(**target_manager.status())
+
+
+@app.post("/api/target/refresh", response_model=TargetStatusResult)
+def target_refresh() -> TargetStatusResult:
+    from core.target import manager as target_manager
+    return TargetStatusResult(**target_manager.refresh())
+
+
+@app.post("/api/target/screenshot", response_model=TargetScreenshotResult)
+def target_screenshot(body: TargetScreenshotBody) -> TargetScreenshotResult:
+    from core.capture import screenshot as _screenshot
+    safe = os.path.basename(body.filename) or "_target.png"
+    path = _screenshot(safe)
+    return TargetScreenshotResult(screenshot=os.path.basename(path), path=path)
 
 
 @app.get("/api/tools", response_model=List[ToolSummary])
@@ -545,7 +589,8 @@ def plan(body: PlanBody) -> PlanResult:
     except Exception as e:
         raise HTTPException(502, f"planner failed: {e}")
     return PlanResult(reasoning=out.get("reasoning", ""),
-                      steps=out.get("steps", []))
+                      steps=out.get("steps", []),
+                      raw_response=out.get("raw_response", ""))
 
 
 @app.post("/api/plan/chat", response_model=PlanResult)
@@ -566,7 +611,9 @@ def plan_chat(body: ChatPlanBody) -> PlanResult:
         out = chat_plan(body.messages, _G, screenshot_path=shot)
     except Exception as e:
         raise HTTPException(502, f"chat planning failed: {e}")
-    return PlanResult(reasoning=out.get("reasoning", ""), steps=out.get("steps", []))
+    return PlanResult(reasoning=out.get("reasoning", ""),
+                      steps=out.get("steps", []),
+                      raw_response=out.get("raw_response", ""))
 
 
 @app.post("/api/run-plan", response_model=RunPlanResult)
@@ -673,7 +720,8 @@ def repair(body: RepairBody) -> PlanResult:
     except Exception as e:
         raise HTTPException(502, f"repair failed: {e}")
     return PlanResult(reasoning=out.get("reasoning", ""),
-                      steps=out.get("steps", []))
+                      steps=out.get("steps", []),
+                      raw_response=out.get("raw_response", ""))
 
 
 @app.get("/api/screenshot/{name}")
@@ -783,6 +831,7 @@ def dedupe_ui_graph() -> UiGraphResult:
 _explore_screenshot: Optional[str] = None
 _explore_logical_w: int = 0
 _explore_logical_h: int = 0
+_explore_scale: float = 1.0
 
 
 def _resolve_explore_domain(domain: Optional[str]) -> str:
@@ -822,7 +871,7 @@ class DetectResult(BaseModel):
     screenshot: str             # filename, served via GET /api/screenshot/{name}
     logical_width: int
     logical_height: int
-    screen_scale: int
+    screen_scale: float
     icons: List[ExploreIcon]
 
 
@@ -860,10 +909,11 @@ def explore_detect(body: DetectBody) -> DetectResult:
     and returns the icon boxes in logical pixels together with the screenshot
     dimensions so the frontend can render an accurate SVG overlay.
     """
-    global _explore_screenshot, _explore_logical_w, _explore_logical_h
+    global _explore_screenshot, _explore_logical_w, _explore_logical_h, _explore_scale
 
     from core.capture import screenshot as _screenshot
     from core.perception.detect import detect_icons
+    from core.target import manager as target_manager
     import cv2
 
     _countdown(body.countdown)
@@ -874,16 +924,20 @@ def explore_detect(body: DetectBody) -> DetectResult:
     if img is None:
         raise HTTPException(500, "Could not read screenshot")
     phys_h, phys_w = img.shape[:2]
-    scale = config.screen_scale()
-    _explore_logical_w = phys_w // scale
-    _explore_logical_h = phys_h // scale
+    scale = target_manager.screenshot_scale()
+    if scale <= 0:
+        scale = float(config.screen_scale())
+    _explore_scale = scale
+    _explore_logical_w = round(phys_w / scale)
+    _explore_logical_h = round(phys_h / scale)
 
-    raw_icons = detect_icons(path)
+    raw_icons = detect_icons(path, scale=scale)
     icons = [
         ExploreIcon(x=ic["x"], y=ic["y"], w=ic["w"], h=ic["h"])
         for ic in raw_icons
     ]
-    logger.info("[explore/detect] %d icons found in %s", len(icons), path)
+    logger.info("[explore/detect] %d icons found in %s (scale %.3f)",
+                len(icons), path, scale)
     return DetectResult(
         screenshot=os.path.basename(path),
         logical_width=_explore_logical_w,
@@ -902,7 +956,7 @@ def explore_label(body: LabelBody) -> LabelResult:
     the last-captured explore screenshot and calls the VLM.  Returns the full
     updated icon list.
     """
-    global _explore_screenshot
+    global _explore_screenshot, _explore_scale
 
     if not _explore_screenshot or not os.path.isfile(_explore_screenshot):
         raise HTTPException(400, "No screenshot available — run /explore/detect first")
@@ -918,7 +972,12 @@ def explore_label(body: LabelBody) -> LabelResult:
     subset = [all_icons[i] for i in valid_indices]
 
     prompt = _get_domain_label_prompt(target)
-    labeled_subset = _label(_explore_screenshot, subset, label_prompt=prompt)
+    labeled_subset = _label(
+        _explore_screenshot,
+        subset,
+        label_prompt=prompt,
+        scale=_explore_scale,
+    )
 
     result = list(all_icons)
     for orig_idx, labeled in zip(valid_indices, labeled_subset):

@@ -32,11 +32,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-import ollama
-
 from core import config
+from core import llm
 from core.agents._common import (
     active_selection_summary,
     element_summary,
@@ -47,6 +48,32 @@ from core.tools import TOOL_CATALOG
 from core.tools.param_specs import format_param, spec_for
 
 logger = logging.getLogger(__name__)
+
+
+def _log_dialogue(
+    kind: str,
+    messages: List[Dict[str, Any]],
+    raw: str,
+    result: Dict[str, Any],
+) -> None:
+    """Persist planner input/output for debugging model behavior."""
+    try:
+        log_dir = os.path.join(config.project_root(), "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        path = os.path.join(log_dir, "planner_dialogue.jsonl")
+        record = {
+            "time": datetime.now(timezone.utc).isoformat(),
+            "kind": kind,
+            "model": config.planner_model_config().model,
+            "provider": config.planner_model_config().provider,
+            "messages": messages,
+            "raw_response": raw,
+            "parsed": result,
+        }
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.warning("Could not write planner dialogue log: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +176,12 @@ Rules:
   give them — their `obj_NNN` id does not exist yet. Keep labels UNIQUE.
 - `tool_name` must be one of the sidebar shapes under REFERENCE.
 - Pick concrete integers for `amount` / sizes / angles.
-- Prefer higher-level tools (L2 compounds like `place_and_label`) when they
+- For multiple free-standing shapes, prefer `place_label_and_move` with
+  distinct `direction` + `amount` values for every shape. Do NOT emit two
+  `place_and_label` or `place_shape` steps in one plan unless a `move_shape`
+  or `extend_shape` separates them; otherwise the shapes overlap at the fixed
+  drop point.
+- Prefer higher-level tools (L2 compounds like `place_label_and_move`) when they
   match — they make the plan shorter and more robust.
 
 # PLAN AS IF YOU WERE EXECUTING
@@ -169,6 +201,11 @@ point — so YOU are responsible for where shapes end up:
    two shapes on top of each other.
 3. To space N items evenly along an axis, center them: item k sits at
    `(k - (N-1)/2) * spacing` (negative = north / west).
+
+For a free-standing shape that needs a distinct location, use
+`place_label_and_move(tool_name, label, direction, amount)`. It places, labels,
+moves by the chosen offset, and deselects. `place_and_label` leaves the shape
+at the fixed drop point and is only safe for a single default-position shape.
 
 When shapes are CONNECTED, prefer `extend_shape(direction)` — it places the
 next shape already offset AND linked, so there are no coordinates to reason
@@ -320,7 +357,7 @@ def plan(
         ``steps`` straight to :func:`core.orchestrator.run_plan`.
     """
     use_screenshot = screenshot_path is not None
-    model = config.llm_model()
+    model = config.planner_model_config().model
     prompt = build_prompt(ui_graph, use_screenshot=use_screenshot)
 
     messages: List[Dict[str, Any]] = [{"role": "system", "content": prompt}]
@@ -331,18 +368,22 @@ def plan(
         "role": "user",
         "content": f"Task: {task}\n\nOutput the complete plan now as one JSON object.",
     }
-    if use_screenshot:
-        with open(screenshot_path, "rb") as f:
-            user_msg["images"] = [f.read()]
     messages.append(user_msg)
 
     mode = "screenshot+sg" if use_screenshot else "text-only"
     logger.info("Planning with %s (%s) …", model, mode)
-    response = ollama.chat(model=model, messages=messages)
-    raw = response["message"]["content"]
+    response = llm.chat(
+        purpose="planner",
+        messages=messages,
+        images=[screenshot_path] if use_screenshot else None,
+        response_format="json_object",
+    )
+    raw = response.content
     logger.debug("Raw planner response:\n%s", raw)
 
     result = parse_plan_response(raw)
+    result["raw_response"] = raw
+    _log_dialogue("plan", messages, raw, result)
     logger.info("Planner produced %d step(s): %s",
                 len(result["steps"]), [s["tool"] for s in result["steps"]])
     return result
@@ -369,23 +410,27 @@ def chat_plan(
         raise ValueError("chat_plan: messages must end with a 'user' turn")
 
     use_screenshot = screenshot_path is not None
-    model = config.llm_model()
+    model = config.planner_model_config().model
     prompt = build_prompt(ui_graph, use_screenshot=use_screenshot)
 
     convo: List[Dict[str, Any]] = [{"role": "system", "content": prompt}]
-    # Copy the provided turns; attach the screenshot to the latest user turn.
+    # Copy the provided turns; attach screenshots through the provider layer.
     turns = [dict(m) for m in messages]
-    if use_screenshot:
-        with open(screenshot_path, "rb") as f:
-            turns[-1]["images"] = [f.read()]
     convo.extend(turns)
 
     logger.info("Chat-planning with %s (%d turns) …", model, len(messages))
-    response = ollama.chat(model=model, messages=convo)
-    raw = response["message"]["content"]
+    response = llm.chat(
+        purpose="planner",
+        messages=convo,
+        images=[screenshot_path] if use_screenshot else None,
+        response_format="json_object",
+    )
+    raw = response.content
     logger.debug("Raw chat-plan response:\n%s", raw)
 
     result = parse_plan_response(raw)
+    result["raw_response"] = raw
+    _log_dialogue("chat_plan", convo, raw, result)
     logger.info("Chat-plan produced %d step(s)", len(result["steps"]))
     return result
 
@@ -466,7 +511,7 @@ def repair(
         ``{"reasoning", "steps"}`` — a corrective plan to review and run.
     """
     use_screenshot = screenshot_path is not None
-    model = config.llm_model()
+    model = config.planner_model_config().model
     prompt = build_prompt(ui_graph, use_screenshot=use_screenshot)
 
     user_block = f"\n# USER GUIDANCE\n{user_note.strip()}\n" if user_note.strip() else ""
@@ -480,17 +525,20 @@ def repair(
         {"role": "system", "content": prompt},
         {"role": "user", "content": user_text},
     ]
-    if use_screenshot:
-        with open(screenshot_path, "rb") as f:
-            messages[-1]["images"] = [f.read()]
-
     logger.info("Repairing with %s (%d flagged step(s)) …",
                 model, len(failed_steps or []))
-    response = ollama.chat(model=model, messages=messages)
-    raw = response["message"]["content"]
+    response = llm.chat(
+        purpose="planner",
+        messages=messages,
+        images=[screenshot_path] if use_screenshot else None,
+        response_format="json_object",
+    )
+    raw = response.content
     logger.debug("Raw repair response:\n%s", raw)
 
     result = parse_plan_response(raw)
+    result["raw_response"] = raw
+    _log_dialogue("repair", messages, raw, result)
     logger.info("Repair produced %d corrective step(s): %s",
                 len(result["steps"]), [s["tool"] for s in result["steps"]])
     return result

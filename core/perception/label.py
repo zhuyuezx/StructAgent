@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 import cv2
 
 from core import config
+from core import llm
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ def label_icons(
     label_prompt: Optional[str] = None,
     timeout: Optional[float] = None,
     max_retries: Optional[int] = None,
+    scale: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """Send each cropped icon to the VLM to identify its type.
 
@@ -47,27 +49,23 @@ def label_icons(
     screenshot_path:
         Full-screen (or region) capture from which icon crops are extracted.
     icons:
-        Each dict must have ``x, y, w, h`` in logical pixels (center + size).
+        Each dict must have ``x, y, w, h`` in target input coordinates.
         An optional ``_px`` key provides physical-pixel equivalents; when absent
-        the logical coords are scaled by ``config.screen_scale()``.
+        the input coords are scaled by ``scale`` or ``config.screen_scale()``.
     label_prompt:
         Domain-specific VLM prompt.  Defaults to a generic fallback.
         Load from ``domains.<name>.perception.LABEL_PROMPT`` for best results.
 
-    Uses ``ollama.Client`` with a real HTTP timeout so hung requests
-    are actually cancelled.
+    Uses the configured provider with a real timeout so hung requests are
+    cancelled when the backend supports it.
     """
-    import httpx
-    import ollama
-
     img = cv2.imread(screenshot_path)
-    model = config.explorer_model()
-    scale = config.screen_scale()
-    timeout = timeout or config.label_timeout()
+    explorer_cfg = config.explorer_model_config()
+    model = explorer_cfg.model
+    scale = float(scale if scale is not None else config.screen_scale())
+    timeout = timeout or explorer_cfg.timeout or config.label_timeout()
     max_retries = max_retries or config.label_max_retries()
     prompt = label_prompt or _GENERIC_LABEL_PROMPT
-
-    client = ollama.Client(timeout=httpx.Timeout(timeout, connect=10.0))
 
     labeled = []
     total = len(icons)
@@ -77,8 +75,8 @@ def label_icons(
 
     for i, icon in enumerate(icons):
         p = icon.get("_px", {
-            "x": icon["x"] * scale, "y": icon["y"] * scale,
-            "w": icon["w"] * scale, "h": icon["h"] * scale,
+            "x": round(icon["x"] * scale), "y": round(icon["y"] * scale),
+            "w": round(icon["w"] * scale), "h": round(icon["h"] * scale),
         })
         pad = 5
         ry1 = max(0, p["y"] - p["h"] // 2 - pad)
@@ -90,20 +88,32 @@ def label_icons(
         _, buf = cv2.imencode(".png", crop)
         img_bytes = buf.tobytes()
 
-        messages = [{
-            "role": "user",
-            "content": prompt,
-            "images": [img_bytes],
-        }]
+        messages = [{"role": "user", "content": prompt}]
 
         label = None
         for attempt in range(1, max_retries + 1):
             try:
-                resp = client.chat(model=model, messages=messages)
-                raw = resp["message"]["content"].strip().split("\n")[0]
+                import os
+                import tempfile
+                fd, crop_path = tempfile.mkstemp(suffix=".png")
+                try:
+                    with os.fdopen(fd, "wb") as f:
+                        f.write(img_bytes)
+                    resp = llm.chat(
+                        purpose="explorer",
+                        messages=messages,
+                        images=[crop_path],
+                        timeout=timeout,
+                    )
+                finally:
+                    try:
+                        os.unlink(crop_path)
+                    except OSError:
+                        pass
+                raw = resp.content.strip().split("\n")[0]
                 label = raw.strip(".,!\"'` ").replace(" ", "_")
                 break
-            except httpx.TimeoutException:
+            except TimeoutError:
                 logger.warning("  Icon %2d: ⏱ timeout (%ss) — "
                                "retry %d/%d", i, timeout, attempt, max_retries)
             except Exception as e:

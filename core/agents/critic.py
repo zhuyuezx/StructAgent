@@ -19,9 +19,11 @@ critic (and the human, in manual mode) judge from the pixels.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, Optional
 
 from core import config
+from core import llm
 from core.agents._common import extract_json
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,43 @@ expectation is NOT satisfied.
 
 Reply with STRICT JSON and nothing else:
   {"passed": true|false, "reasoning": "<one or two sentences citing what you see>"}"""
+
+
+def _infer_passed_from_text(text: str) -> Optional[bool]:
+    """Best-effort repair for small local models that omit ``passed``."""
+    t = text.lower()
+    negative = [
+        "not satisfied", "does not satisfy", "doesn't satisfy",
+        "not visible", "cannot see", "can't see", "missing",
+        "incorrect", "wrong", "empty", "ambiguous", "not placed",
+        "no second", "no rectangle", "no shape", "only a single",
+        "only one", "only 1", "there is no",
+    ]
+    positive = [
+        "satisfies", "satisfied", "clearly shows", "is visible",
+        "has been placed", "placed on", "matches the expectation",
+        "directly satisfies",
+    ]
+    if any(p in t for p in negative):
+        return False
+    if any(p in t for p in positive):
+        return True
+    match = re.search(r"\bpassed?\s*[:=]\s*(true|false|yes|no)\b", t)
+    if match:
+        return match.group(1) in {"true", "yes"}
+    return None
+
+
+def _coerce_passed(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in {"true", "yes", "pass", "passed"}:
+            return True
+        if v in {"false", "no", "fail", "failed"}:
+            return False
+    return None
 
 
 def _build_user_content(description: str, scene_hint: Optional[str]) -> str:
@@ -82,15 +121,13 @@ def verify(
     (unreadable image, model/parse failure) returns ``passed=False`` with the
     reason, so the caller fails safe and the user can verify manually.
     """
-    import httpx
-    import ollama
-
-    model = model or config.critic_model()
-    timeout = timeout or config.critic_timeout()
+    critic_cfg = config.critic_model_config()
+    model = model or critic_cfg.model
+    timeout = timeout or critic_cfg.timeout or config.critic_timeout()
 
     try:
-        with open(screenshot_path, "rb") as f:
-            img_bytes = f.read()
+        with open(screenshot_path, "rb"):
+            pass
     except OSError as e:
         return {"passed": False, "reasoning": f"could not read screenshot: {e}",
                 "model": model}
@@ -98,15 +135,19 @@ def verify(
     messages = [
         {"role": "system", "content": _SYSTEM},
         {"role": "user",
-         "content": _build_user_content(description, scene_hint),
-         "images": [img_bytes]},
+         "content": _build_user_content(description, scene_hint)},
     ]
 
     logger.info("Critic verifying with %s: %r", model, description[:80])
-    client = ollama.Client(timeout=httpx.Timeout(timeout, connect=10.0))
     try:
-        resp = client.chat(model=model, messages=messages)
-        raw = resp["message"]["content"]
+        resp = llm.chat(
+            purpose="critic",
+            messages=messages,
+            images=[screenshot_path],
+            response_format="json_object",
+            timeout=timeout,
+        )
+        raw = resp.content
     except Exception as e:  # pragma: no cover - network/model dependent
         return {"passed": False, "reasoning": f"critic call failed: {e}",
                 "model": model}
@@ -115,13 +156,34 @@ def verify(
         parsed = extract_json(raw)
     except ValueError:
         parsed = None
-    if not isinstance(parsed, dict) or "passed" not in parsed:
-        return {"passed": False,
-                "reasoning": f"could not parse critic reply: {raw[:200]!r}",
-                "model": model}
+    if isinstance(parsed, dict):
+        reasoning = str(parsed.get("reasoning", "")).strip()
+        if "passed" in parsed:
+            passed = _coerce_passed(parsed.get("passed"))
+            if passed is None:
+                passed = _infer_passed_from_text(str(parsed.get("passed")) + " " + reasoning)
+            if passed is None:
+                passed = False
+            return {
+                "passed": passed,
+                "reasoning": reasoning,
+                "model": model,
+            }
+        inferred = _infer_passed_from_text(reasoning or raw)
+        if inferred is not None:
+            return {
+                "passed": inferred,
+                "reasoning": reasoning or "critic omitted passed; inferred from reply",
+                "model": model,
+            }
 
-    return {
-        "passed": bool(parsed.get("passed")),
-        "reasoning": str(parsed.get("reasoning", "")).strip(),
-        "model": model,
-    }
+    inferred = _infer_passed_from_text(raw)
+    if inferred is not None:
+        return {
+            "passed": inferred,
+            "reasoning": "critic omitted strict JSON; inferred from reply: " + raw[:180],
+            "model": model,
+        }
+    return {"passed": False,
+            "reasoning": f"could not parse critic reply: {raw[:200]!r}",
+            "model": model}

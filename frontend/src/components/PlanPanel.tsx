@@ -74,6 +74,16 @@ function assistantText(content: string): string {
     return content;
   }
 }
+function assistantRaw(content: string): string | null {
+  try {
+    const o = JSON.parse(content);
+    return typeof o.raw_response === 'string' && o.raw_response.trim()
+      ? o.raw_response
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
   const [convo, setConvo] = useState<ChatMessage[]>([]);
@@ -152,7 +162,7 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
       });
       setConvo([
         ...next,
-        { role: 'assistant', content: JSON.stringify({ reasoning: p.reasoning, steps: p.steps }) },
+        { role: 'assistant', content: JSON.stringify({ reasoning: p.reasoning, steps: p.steps, raw_response: p.raw_response }) },
       ]);
       setSteps(p.steps);
       resetRunState();
@@ -356,7 +366,7 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
       setConvo([
         ...convo,
         { role: 'user', content: `[Fix] ${repairNote || 'fix the flagged steps'}` },
-        { role: 'assistant', content: JSON.stringify({ reasoning: p.reasoning, steps: p.steps }) },
+        { role: 'assistant', content: JSON.stringify({ reasoning: p.reasoning, steps: p.steps, raw_response: p.raw_response }) },
       ]);
       setSteps(p.steps);
       resetRunState();
@@ -476,6 +486,12 @@ export function PlanPanel({ tools, onSceneGraphUpdated, onToolSaved }: Props) {
               </span>
               <div className="plan__msg-body">
                 {m.role === 'assistant' ? assistantText(m.content) : m.content}
+                {m.role === 'assistant' && assistantRaw(m.content) && (
+                  <details className="plan__raw">
+                    <summary>Raw model response</summary>
+                    <pre>{assistantRaw(m.content)}</pre>
+                  </details>
+                )}
               </div>
             </div>
           ))

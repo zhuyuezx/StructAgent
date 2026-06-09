@@ -1,0 +1,19 @@
+{
+  "name": "place_label_and_move",
+  "description": "Place a shape at the fixed draw.io drop point, label it, move the newly-created selected shape by direction+amount, then deselect. Use this instead of place_and_label for multiple free-standing shapes so they do not overlap.",
+  "params": [
+    "tool_name",
+    "label",
+    "direction",
+    "amount"
+  ],
+  "needs_ui_graph": true,
+  "children": [
+    "place_shape",
+    "type_label",
+    "press_escape",
+    "move_shape",
+    "click_empty_canvas"
+  ],
+  "python_fn": "domains.drawio.operations:_fn_place_label_and_move"
+}

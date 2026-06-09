@@ -26,6 +26,9 @@ import type {
   SegmentResult,
   SetDomainBody,
   SetDomainResult,
+  TargetScreenshotBody,
+  TargetScreenshotResult,
+  TargetStatusResult,
   ToolDetail,
   ToolSummary,
   UiGraphResult,
@@ -141,6 +144,14 @@ export const api = {
   getDomains: () => request<DomainsResult>('/domains'),
   setDomain: (body: SetDomainBody) =>
     request<SetDomainResult>('/domain', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  targetStatus: () => request<TargetStatusResult>('/target/status'),
+  targetRefresh: () =>
+    request<TargetStatusResult>('/target/refresh', { method: 'POST' }),
+  targetScreenshot: (body: TargetScreenshotBody) =>
+    request<TargetScreenshotResult>('/target/screenshot', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
