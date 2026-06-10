@@ -12,6 +12,24 @@ npm run dev -- --host 127.0.0.1 --port 5173
 & "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="D:\tmp\drawio-chrome-profile"
 ```
 
+### Ablation
+```
+$OUT = "logs\ablation_live"
+
+  foreach ($rep in 1..3) {
+    foreach ($task in "source_target","rect3","rect5","rect6") {
+      python tests\run_screenshot_ablation.py --task-id $task --condition sg_only --rep $rep --clear-canvas --out $OUT
+      python tests\run_screenshot_ablation.py --task-id $task --condition screenshot_sg --rep $rep --clear-canvas --out $OUT
+    }
+  }
+```
+```
+python tests\summarize_screenshot_ablation.py --input logs\ablation_live --agent planner
+python tests\plot_screenshot_ablation.py --input logs\ablation_live --agent planner --output logs\ablation_live\textonly_ablation.svg
+
+Get-Content logs\ablation_live\summary.md
+```
+
 ### Debug
 
 ```

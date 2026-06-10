@@ -306,24 +306,53 @@ class ChromeCdpController(CaptureController, InputController):
         self.hotkey(key)
 
     def hotkey(self, *keys: str) -> None:
-        text_keys = [k for k in keys if len(k) == 1]
+        norm = [str(k).lower() for k in keys]
+        text_keys = [k for k in norm if len(k) == 1]
         modifiers = 0
-        if any(k in {"ctrl", "control"} for k in keys):
+        if any(k in {"ctrl", "control"} for k in norm):
             modifiers |= 2
-        if any(k in {"alt", "option"} for k in keys):
+        if any(k in {"alt", "option"} for k in norm):
             modifiers |= 1
-        if any(k in {"shift"} for k in keys):
+        if any(k in {"shift"} for k in norm):
             modifiers |= 8
-        if any(k in {"cmd", "command", "meta"} for k in keys):
+        if any(k in {"cmd", "command", "meta"} for k in norm):
             modifiers |= 4
-        key = text_keys[-1] if text_keys else keys[-1]
-        code = key.upper() if len(key) == 1 else key
-        self._call("Input.dispatchKeyEvent", {
-            "type": "keyDown", "key": key, "code": code, "modifiers": modifiers,
-        })
-        self._call("Input.dispatchKeyEvent", {
-            "type": "keyUp", "key": key, "code": code, "modifiers": modifiers,
-        })
+        key_name = text_keys[-1] if text_keys else norm[-1]
+        key, code, vk = self._key_event_fields(key_name)
+        base = {
+            "key": key,
+            "code": code,
+            "windowsVirtualKeyCode": vk,
+            "nativeVirtualKeyCode": vk,
+            "modifiers": modifiers,
+        }
+        self._call("Input.dispatchKeyEvent", {"type": "keyDown", **base})
+        self._call("Input.dispatchKeyEvent", {"type": "keyUp", **base})
+
+    @staticmethod
+    def _key_event_fields(key_name: str) -> Tuple[str, str, int]:
+        aliases = {
+            "return": "enter",
+            "esc": "escape",
+            "del": "delete",
+            "backspace": "backspace",
+        }
+        key_name = aliases.get(key_name, key_name)
+        special = {
+            "enter": ("Enter", "Enter", 13),
+            "escape": ("Escape", "Escape", 27),
+            "delete": ("Delete", "Delete", 46),
+            "backspace": ("Backspace", "Backspace", 8),
+            "tab": ("Tab", "Tab", 9),
+        }
+        if key_name in special:
+            return special[key_name]
+        if len(key_name) == 1 and key_name.isalpha():
+            upper = key_name.upper()
+            return key_name, f"Key{upper}", ord(upper)
+        if len(key_name) == 1 and key_name.isdigit():
+            return key_name, f"Digit{key_name}", ord(key_name)
+        return key_name, key_name, 0
 
     def write(self, text: str, interval: Optional[float] = None) -> None:
         delay = interval if interval is not None else config.type_interval()

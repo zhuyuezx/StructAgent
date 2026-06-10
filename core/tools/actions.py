@@ -14,6 +14,7 @@ Each function:
 from __future__ import annotations
 
 import logging
+import platform
 import time
 from typing import Any, Dict, Optional
 
@@ -25,6 +26,11 @@ from core.tools.reconcile import get_scene, save_scene, scan_and_reconcile
 from core.tools.registry import resolve_node
 
 logger = logging.getLogger(__name__)
+
+
+def _mod_key() -> str:
+    """Return the platform shortcut modifier used by draw.io."""
+    return "command" if platform.system() == "Darwin" else "ctrl"
 
 
 # ===========================================================================
@@ -163,9 +169,10 @@ def _fn_hotkey(keys: list) -> dict:
 
 
 def _fn_undo() -> dict:
-    """Undo the last canvas action (Cmd+Z)."""
-    logger.info("  [L1] undo (Cmd+Z)")
-    atom_hotkey("command", "z")
+    """Undo the last canvas action."""
+    mod = _mod_key()
+    logger.info("  [L1] undo (%s+Z)", mod)
+    atom_hotkey(mod, "z")
     return {"status": "ok", "tool": "undo"}
 
 
@@ -177,11 +184,12 @@ def _fn_press_enter() -> dict:
 
 def _fn_press_delete() -> dict:
     logger.info("  [L1] press_delete")
-    atom_press("BackSpace")
+    atom_press("delete")
     return {"status": "ok", "tool": "press_delete"}
 
 
 def _fn_select_all() -> dict:
-    logger.info("  [L1] select_all (Cmd+A)")
-    atom_hotkey("command", "a")
+    mod = _mod_key()
+    logger.info("  [L1] select_all (%s+A)", mod)
+    atom_hotkey(mod, "a")
     return {"status": "ok", "tool": "select_all"}
