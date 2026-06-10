@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -41,13 +42,20 @@ from core import llm
 from core.agents._common import (
     active_selection_summary,
     element_summary,
-    extract_json,
 )
 from core.state import scene_graph as _sg
 from core.tools import TOOL_CATALOG
 from core.tools.param_specs import format_param, spec_for
 
 logger = logging.getLogger(__name__)
+
+
+class _PairsDict(dict):
+    """dict that keeps JSON object pairs so duplicate tool keys can be salvaged."""
+
+    def __init__(self, pairs: List[tuple[str, Any]]):
+        super().__init__(pairs)
+        self.__pairs__ = pairs
 
 
 def _log_dialogue(
@@ -177,7 +185,8 @@ Rules:
 - `tool_name` must be one of the sidebar shapes under REFERENCE.
 - Pick concrete integers for `amount` / sizes / angles.
 - For multiple free-standing shapes, prefer `place_label_and_move` with
-  distinct `direction` + `amount` values for every shape. Do NOT emit two
+  distinct NON-OVERLAPPING `direction` + `amount` values for every shape.
+  Do NOT emit two
   `place_and_label` or `place_shape` steps in one plan unless a `move_shape`
   or `extend_shape` separates them; otherwise the shapes overlap at the fixed
   drop point.
@@ -194,13 +203,19 @@ point — so YOU are responsible for where shapes end up:
 
 1. First assign each shape a target offset from the drop point: choose one
    layout (line, grid, ring, …) and one fixed spacing. The offsets must be
-   pairwise DISTINCT and spread around the point.
+   pairwise DISTINCT, non-overlapping, and spread around the point.
 2. Then realize each shape — place it, then `move_shape` by its offset. The
    move is measured from the drop point, NOT from other shapes, so the amount a
    freshly-placed shape gets IS its offset. Reusing a direction+amount stacks
    two shapes on top of each other.
 3. To space N items evenly along an axis, center them: item k sits at
    `(k - (N-1)/2) * spacing` (negative = north / west).
+4. Rectangles are wide. Use at least 180 logical px between neighboring
+   rectangle centers, and prefer 220 logical px for 4+ rectangles. Do NOT use
+   amount=100 for multiple rectangles; it makes adjacent boxes touch or
+   overlap. For 5 rectangles, prefer a cross/grid layout such as:
+   Rect1 `nw 220`, Rect2 `ne 220`, Rect3 `e 260`, Rect4 `se 220`,
+   Rect5 `sw 220` (or another layout with comparable spacing).
 
 For a free-standing shape that needs a distinct location, use
 `place_label_and_move(tool_name, label, direction, amount)`. It places, labels,
@@ -223,6 +238,7 @@ Assertions (use the SCENE GRAPH facts you are predicting):
 - `{{"check": "edges_count", "op": "==", "value": 1}}`
 - `{{"check": "object_exists", "label": "Source"}}`
 - `{{"check": "edge_exists", "source": "Source", "target": "Target"}}`
+- `{{"check": "no_overlap", "labels": ["Rect1", "Rect2"], "min_gap": 12}}`
 - `{{"check": "selected", "label": "Target"}}`
 Prefer `object_exists` / `edge_exists` (robust) over exact counts. Keep 1-3
 assertions per checkpoint. Steps without a meaningful result need no checkpoint.
@@ -245,6 +261,10 @@ assertions per checkpoint. Steps without a meaningful result need no checkpoint.
 # OUTPUT FORMAT
 Respond with a SINGLE JSON object — no markdown, no commentary, no code fences.
 Attach a "checkpoint" only to steps that produce a verifiable milestone:
+
+Every item in "steps" must be an object with "tool" and "params". Never use a
+tool name like "connect_shapes" as an object key inside "steps"; write it as
+{{"tool": "connect_shapes", "params": {{...}}}}.
 
 {{
   "reasoning": "How the SCENE GRAPH + task map to this sequence of steps.",
@@ -288,10 +308,47 @@ def build_prompt(ui_graph: Dict[str, Any], use_screenshot: bool = False) -> str:
 # Response parsing
 # ---------------------------------------------------------------------------
 
+_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
+
+
+def _json_loads_with_pairs(text: str) -> Any:
+    return json.loads(text, object_pairs_hook=_PairsDict)
+
+
+def _extract_json_with_pairs(raw: str) -> Any:
+    """Planner JSON extraction that preserves duplicate keys for salvage."""
+    text = raw.strip()
+    try:
+        return _json_loads_with_pairs(text)
+    except json.JSONDecodeError:
+        pass
+
+    match = _JSON_BLOCK_RE.search(text)
+    if match:
+        return _json_loads_with_pairs(match.group(1))
+
+    candidates = [(text.find("{"), text.rfind("}")), (text.find("["), text.rfind("]"))]
+    candidates = [(s, e) for s, e in candidates if s != -1 and e > s]
+    if candidates:
+        s, e = min(candidates, key=lambda c: c[0])
+        return _json_loads_with_pairs(text[s:e + 1])
+
+    raise ValueError(f"Could not parse JSON from model response:\n{raw}")
+
+
+def _lift_nested_checkpoint(params: Dict[str, Any], step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Accept the common malformed case where checkpoint is inside params."""
+    ckpt = step.get("checkpoint")
+    if isinstance(ckpt, dict):
+        return ckpt
+    nested = params.pop("checkpoint", None)
+    return nested if isinstance(nested, dict) else None
+
+
 def _normalize_step(step: Dict[str, Any]) -> Dict[str, Any]:
     """Coerce one raw step into ``{tool, params}`` (accepts 'action' alias)."""
     tool = step.get("tool") or step.get("action")
-    params = step.get("params") or step.get("parameters") or {}
+    params = dict(step.get("params") or step.get("parameters") or {})
     out: Dict[str, Any] = {"tool": tool, "params": params}
     # Carry the model's per-step rationale through if present — useful for the
     # UI/repair phases; run_plan ignores it.
@@ -299,10 +356,28 @@ def _normalize_step(step: Dict[str, Any]) -> Dict[str, Any]:
         out["reasoning"] = step["reasoning"]
     # Carry an optional checkpoint through — run_plan evaluates it after the
     # step (see core.checkpoint). Only keep well-formed dicts.
-    ckpt = step.get("checkpoint")
+    ckpt = _lift_nested_checkpoint(params, step)
     if isinstance(ckpt, dict) and ckpt.get("assert"):
         out["checkpoint"] = ckpt
     return out
+
+
+def _expand_tool_key_steps(step: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Turn duplicate top-level tool keys into independent planner steps."""
+    expanded = [_normalize_step(step)]
+    pairs = getattr(step, "__pairs__", [])
+    for key, value in pairs:
+        if key in {"tool", "action", "params", "parameters", "checkpoint", "reasoning"}:
+            continue
+        if key not in TOOL_CATALOG or not isinstance(value, dict):
+            continue
+        if "tool" in value or "action" in value or "params" in value or "parameters" in value:
+            keyed_step = dict(value)
+            keyed_step.setdefault("tool", key)
+        else:
+            keyed_step = {"tool": key, "params": value}
+        expanded.append(_normalize_step(keyed_step))
+    return expanded
 
 
 def parse_plan_response(raw: str) -> Dict[str, Any]:
@@ -311,7 +386,7 @@ def parse_plan_response(raw: str) -> Dict[str, Any]:
     Accepts any of: a top-level JSON array of steps, ``{"steps": [...]}``, or
     ``{"plan": [...]}``. Each step is normalized to ``{tool, params}``.
     """
-    data = extract_json(raw)
+    data = _extract_json_with_pairs(raw)
 
     if isinstance(data, list):
         steps_raw, reasoning = data, ""
@@ -324,7 +399,10 @@ def parse_plan_response(raw: str) -> Dict[str, Any]:
     if not isinstance(steps_raw, list):
         raise ValueError(f"Planner 'steps' is not a list: {steps_raw!r}")
 
-    steps = [_normalize_step(s) for s in steps_raw if isinstance(s, dict)]
+    steps: List[Dict[str, Any]] = []
+    for raw_step in steps_raw:
+        if isinstance(raw_step, dict):
+            steps.extend(_expand_tool_key_steps(raw_step))
     missing = [i for i, s in enumerate(steps) if not s["tool"]]
     if missing:
         raise ValueError(f"Planner produced step(s) with no 'tool' at index {missing}")

@@ -121,13 +121,17 @@ def reset() -> Dict[str, Any]:
 # ===========================================================================
 
 def _anchors_from_bbox(bbox: List[int]) -> Dict[str, List[int]]:
-    """Compute N/S/E/W edge midpoints from a bbox."""
+    """Compute draw.io connection points from a bbox."""
     x, y, w, h = bbox
     return {
         "n": [x + w // 2, y],
         "s": [x + w // 2, y + h],
         "e": [x + w, y + h // 2],
         "w": [x, y + h // 2],
+        "nw": [x, y],
+        "ne": [x + w, y],
+        "sw": [x, y + h],
+        "se": [x + w, y + h],
     }
 
 

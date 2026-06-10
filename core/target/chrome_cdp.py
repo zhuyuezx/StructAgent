@@ -269,6 +269,39 @@ class ChromeCdpController(CaptureController, InputController):
         }))
         self._call_many(calls)
 
+    def drag_path(self, points: List[Tuple[int, int]], duration: Optional[float] = None,
+                  hold_pre: float = 0.1) -> None:
+        if len(points) < 2:
+            return
+        mapped = [self.map_point(x, y) for x, y in points]
+        duration = duration if duration is not None else config.drag_duration()
+        sx, sy = mapped[0]
+        calls: List[Tuple[str, Dict[str, Any]]] = [
+            ("Input.dispatchMouseEvent", {
+                "type": "mouseMoved", "x": sx, "y": sy,
+            }),
+            ("Input.dispatchMouseEvent", {
+                "type": "mousePressed", "x": sx, "y": sy,
+                "button": "left", "clickCount": 1,
+            }),
+        ]
+        time.sleep(hold_pre)
+        steps_per_leg = max(2, min(8, int(duration / 0.08) or 2))
+        for (ax, ay), (bx, by) in zip(mapped, mapped[1:]):
+            for i in range(1, steps_per_leg + 1):
+                x = ax + (bx - ax) * i / steps_per_leg
+                y = ay + (by - ay) * i / steps_per_leg
+                calls.append(("Input.dispatchMouseEvent", {
+                    "type": "mouseMoved", "x": x, "y": y,
+                    "button": "left", "buttons": 1,
+                }))
+        tx, ty = mapped[-1]
+        calls.append(("Input.dispatchMouseEvent", {
+            "type": "mouseReleased", "x": tx, "y": ty,
+            "button": "left", "clickCount": 1,
+        }))
+        self._call_many(calls)
+
     def press(self, key: str) -> None:
         self.hotkey(key)
 

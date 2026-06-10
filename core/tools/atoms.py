@@ -13,7 +13,7 @@ These are the building blocks used by:
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from core import config
 from core.target import manager as target_manager
@@ -43,6 +43,16 @@ def atom_drag(
     if duration is None:
         duration = config.drag_duration()
     target_manager.input_controller().drag(sx, sy, tx, ty, duration=duration, hold_pre=hold_pre)
+
+
+def atom_drag_path(
+    points: List[Tuple[int, int]], duration: Optional[float] = None,
+    hold_pre: float = 0.1,
+) -> None:
+    """Drag through multiple points while holding the mouse button."""
+    if duration is None:
+        duration = config.drag_duration()
+    target_manager.input_controller().drag_path(points, duration=duration, hold_pre=hold_pre)
 
 
 # ===========================================================================

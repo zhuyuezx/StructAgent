@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class CaptureController:
@@ -41,6 +41,14 @@ class InputController:
     def drag(self, sx: int, sy: int, tx: int, ty: int, duration: Optional[float] = None,
              hold_pre: float = 0.1) -> None:
         raise NotImplementedError
+
+    def drag_path(self, points: List[Tuple[int, int]], duration: Optional[float] = None,
+                  hold_pre: float = 0.1) -> None:
+        if len(points) < 2:
+            return
+        sx, sy = points[0]
+        tx, ty = points[-1]
+        self.drag(sx, sy, tx, ty, duration=duration, hold_pre=hold_pre)
 
     def press(self, key: str) -> None:
         raise NotImplementedError

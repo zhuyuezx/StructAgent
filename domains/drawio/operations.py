@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional
 from core import config
 from core.state import scene_graph as _sg
 from core.target import manager as target_manager
-from core.tools.atoms import atom_click_at, atom_drag, atom_move_to, atom_press
+from core.tools.atoms import atom_click_at, atom_drag, atom_drag_path, atom_move_to, atom_press
 from core.tools.reconcile import (
     get_scene, save_scene,
     _HOVER_DELAY,
@@ -39,6 +39,9 @@ _RESIZE_DIRECTION_VECTOR: Dict[str, tuple] = {
     "ne": (1, -1),  "nw": (-1, -1), "se": (1, 1),   "sw": (-1, 1),
 }
 _EXTEND_OFFSET_PX = 140
+_QUICK_CONNECT_OFFSET_PX = 28
+_QUICK_CONNECT_OFFSET_BY_ANCHOR = {"n": 28, "s": 28, "e": 28, "w": 44}
+_TARGET_CONNECT_APPROACH_PX = 24
 
 # Accept human / LLM phrasings for directions and normalize to canonical
 # compass codes. The Executor and Planner are told to use n/s/e/w, but local
@@ -64,6 +67,53 @@ def _norm_dir(direction: str) -> str:
     return _DIRECTION_ALIASES.get(key, key)
 
 
+def _anchor_toward_target(src_cx: int, src_cy: int, tgt_cx: int, tgt_cy: int) -> str:
+    """Pick the cardinal source side whose outward direction faces target."""
+    if abs(tgt_cx - src_cx) >= abs(tgt_cy - src_cy):
+        return "e" if tgt_cx > src_cx else "w"
+    return "s" if tgt_cy > src_cy else "n"
+
+
+def _anchor_points_toward(anchor: str, dx: int, dy: int) -> bool:
+    """Return whether a requested cardinal anchor points toward a vector."""
+    ax, ay = _RESIZE_DIRECTION_VECTOR[anchor]
+    return (ax * dx + ay * dy) > 0
+
+
+def _approach_point_for_anchor(anchor: str, x: int, y: int, offset: int) -> tuple[int, int]:
+    """Point just outside a shape anchor, used to reveal target connection points."""
+    dx, dy = _RESIZE_DIRECTION_VECTOR[anchor]
+    return int(x + dx * offset), int(y + dy * offset)
+
+
+def _bbox_close(a: Any, b: Any, tol: int = 12) -> bool:
+    if not a or not b or len(a) != 4 or len(b) != 4:
+        return False
+    return all(abs(int(x) - int(y)) <= tol for x, y in zip(a, b))
+
+
+def _detected_quick_connect_point(
+    ui_graph: Dict[str, Any], src: Dict[str, Any], source_anchor: str,
+) -> Optional[tuple[int, int]]:
+    """Return a freshly detected source quick-connect point, if trustworthy."""
+    bbox = src.get("bbox")
+    if not bbox:
+        return None
+    try:
+        handles = refresh_handles(ui_graph, hint_bbox=tuple(bbox))
+    except Exception as exc:  # best-effort; bbox fallback remains deterministic
+        logger.debug("connect_shapes handle refresh failed: %s", exc)
+        return None
+    if not handles.is_valid() or not handles.shape_bbox:
+        return None
+    if not _bbox_close(handles.shape_bbox, bbox):
+        return None
+    point = handles.extend.get(source_anchor)
+    if not point:
+        return None
+    return int(point[0]), int(point[1])
+
+
 def _active_object(sg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Return the object an operand should act on.
 
@@ -78,6 +128,27 @@ def _active_object(sg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if sel and sel.get("bbox"):
         return sel
     return next((o for o in reversed(sg["objects"]) if o.get("bbox")), None)
+
+
+def _empty_point_away_from_bbox(bbox: Optional[list]) -> tuple[int, int]:
+    """Return a canvas point that should not hit the given shape bbox."""
+    x, y = config.empty_canvas_point()
+    if not bbox:
+        return int(x), int(y)
+
+    bx, by, bw, bh = [int(v) for v in bbox]
+    pad = 12
+    inside = (
+        bx - pad <= x <= bx + bw + pad
+        and by - pad <= y <= by + bh + pad
+    )
+    if not inside:
+        return int(x), int(y)
+
+    # Draw.io drops new shapes near the canvas center. If the configured
+    # "empty" point collides with that shape, step left/up far enough to
+    # commit text editing without selecting the shape again.
+    return max(20, bx - 80), max(20, by - 80)
 
 
 def _reselect_if_needed(ui_graph: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -348,6 +419,14 @@ def _fn_place_label_and_move(
         return {**placed, "tool": "place_label_and_move"}
     target_id = placed.get("scene_object_id")
 
+    # Do not rely on draw.io auto-entering text-edit mode after placement.
+    # Some states leave the new shape selected but not editing, so explicitly
+    # double-click the newly dropped shape before typing its label.
+    label_x, label_y = target_manager.canvas_center()
+    logger.info("  [L2] place_label_and_move enter label edit at (%d,%d)", label_x, label_y)
+    atom_click_at(label_x, label_y, clicks=2)
+    time.sleep(0.25)
+
     typed = _fn_type_label(label, ui_graph=ui_graph)
     if typed.get("status") != "ok":
         return {**typed, "tool": "place_label_and_move"}
@@ -368,6 +447,20 @@ def _fn_place_label_and_move(
         # when handle detection has not yet reconciled a bbox.
         gx, gy = target_manager.canvas_center()
 
+    empty_x, empty_y = _empty_point_away_from_bbox(bbox)
+    logger.info("  [L2] place_label_and_move exit text edit via empty click (%d,%d)", empty_x, empty_y)
+    atom_click_at(empty_x, empty_y)
+    time.sleep(0.2)
+    _sg.set_selected(sg, None)
+    ui_graph["selected_handles"] = None
+
+    logger.info("  [L2] place_label_and_move reselect shape at (%d,%d)", gx, gy)
+    atom_click_at(gx, gy)
+    time.sleep(0.2)
+    if target_id:
+        _sg.set_selected(sg, target_id)
+        save_scene(ui_graph)
+
     dx, dy = _RESIZE_DIRECTION_VECTOR[direction]
     tx, ty = int(gx + dx * amount), int(gy + dy * amount)
     logger.info("  [L2] place_label_and_move('%s', '%s', %s, %d) drag (%d,%d) -> (%d,%d)",
@@ -384,7 +477,18 @@ def _fn_place_label_and_move(
         )
         _sg.set_selected(sg, target_id)
         save_scene(ui_graph)
+    final_empty_x, final_empty_y = _empty_point_away_from_bbox(
+        [int(tx - (int(bbox[2]) if bbox else 80) // 2),
+         int(ty - (int(bbox[3]) if bbox else 40) // 2),
+         int(bbox[2]) if bbox else 80,
+         int(bbox[3]) if bbox else 40]
+    )
     atom_press("Escape")
+    time.sleep(0.1)
+    atom_click_at(final_empty_x, final_empty_y)
+    if target_id:
+        _sg.set_selected(sg, None)
+        save_scene(ui_graph)
     time.sleep(0.1)
     dispatch_result = {
         "status": "ok",
@@ -422,7 +526,7 @@ def _fn_hover_object(ui_graph: Dict[str, Any], object_id: str) -> dict:
 
 def _fn_connect_shapes(
     ui_graph: Dict[str, Any], source_id: str, target_id: str,
-    source_anchor: str = "auto",
+    source_anchor: str = "auto", target_anchor: str = "auto",
 ) -> dict:
     """Draw a visible edge between two scene-graph objects.
 
@@ -431,8 +535,8 @@ def _fn_connect_shapes(
       2. If ``source_anchor='auto'``, pick the cardinal direction (n/s/e/w)
          on the source whose center→target vector has the largest component
          (i.e. the edge of the source closest to the target).
-      3. Select the source, find the extend-arrow handle at ``source_anchor``,
-         and drag it to the target's center.
+      3. Select the source to reveal its quick-connect arrows, then drag from
+         the source quick-connect arrow to the chosen target anchor.
       4. Record the edge in the scene graph.
     """
     sync_current_bbox(ui_graph)
@@ -450,15 +554,21 @@ def _fn_connect_shapes(
         return {"status": "error", "tool": "connect_shapes",
                 "error": f"source '{source_id}' or target '{target_id}' "
                          f"not in scene_graph"}
-    # Ensure both source and target have bboxes (click_node triggers
-    # handle detection + bbox reconciliation via scan_and_reconcile).
+    # Use scene-graph bboxes when available. Only click an endpoint when its
+    # bbox is missing; otherwise avoid changing selection before the drag.
     from core.tools.actions import _fn_click_node as _click_node
-    if not src.get("bbox"):
-        _click_node(ui_graph, source_id)
-        src = _sg.find_by_id(sg, source_id)
     if not tgt.get("bbox"):
         _click_node(ui_graph, target_id)
-        tgt = _sg.find_by_id(sg, target_id)
+        tgt = _sg.find_by_id(sg, target_id) or next(
+            (o for o in sg["objects"] if o.get("label") == target_id),
+            tgt,
+        )
+    if not src.get("bbox"):
+        _click_node(ui_graph, source_id)
+        src = _sg.find_by_id(sg, source_id) or next(
+            (o for o in sg["objects"] if o.get("label") == source_id),
+            src,
+        )
     if not src.get("bbox") or not tgt.get("bbox"):
         return {"status": "error", "tool": "connect_shapes",
                 "error": f"could not determine bbox — "
@@ -474,48 +584,69 @@ def _fn_connect_shapes(
     if source_anchor != "auto":
         source_anchor = _norm_dir(source_anchor)
     if source_anchor == "auto":
-        if abs(tgt_cx - src_cx) >= abs(tgt_cy - src_cy):
-            source_anchor = "e" if tgt_cx > src_cx else "w"
-        else:
-            source_anchor = "s" if tgt_cy > src_cy else "n"
+        source_anchor = _anchor_toward_target(src_cx, src_cy, tgt_cx, tgt_cy)
     elif source_anchor not in ("n", "s", "e", "w"):
         return {"status": "error", "tool": "connect_shapes",
                 "error": f"source_anchor must be n/s/e/w/auto, got '{source_anchor}'"}
-
-    # Ensure the source shape is selected so its extend-arrows are visible.
-    if not src.get("selected") or not ui_graph.get("selected_handles"):
-        _click_node(ui_graph, source_id)
-    handles = ui_graph.get("selected_handles") or {}
-    extend = handles.get("extend", {})
-
-    # Determine the drag start point: prefer the detected extend-arrow
-    # handle if available; otherwise fall back to the source's anchor
-    # point nudged slightly outward so the drag starts just outside the
-    # shape border (where drawio's connection zone begins).
-    if source_anchor not in extend:
-        sa_pt = src["anchors"][source_anchor]
-        nudge = 12
-        dx, dy = _RESIZE_DIRECTION_VECTOR[source_anchor]
-        sx, sy = sa_pt[0] + dx * nudge, sa_pt[1] + dy * nudge
     else:
-        sx, sy = extend[source_anchor]
+        dx, dy = tgt_cx - src_cx, tgt_cy - src_cy
+        if not _anchor_points_toward(source_anchor, dx, dy):
+            corrected = _anchor_toward_target(src_cx, src_cy, tgt_cx, tgt_cy)
+            logger.info("  [L1] connect_shapes override source_anchor %s -> %s",
+                        source_anchor, corrected)
+            source_anchor = corrected
+
+    if target_anchor != "auto":
+        target_anchor = _norm_dir(target_anchor)
+    if target_anchor == "auto":
+        target_anchor = _anchor_toward_target(tgt_cx, tgt_cy, src_cx, src_cy)
+    elif target_anchor not in ("n", "s", "e", "w"):
+        return {"status": "error", "tool": "connect_shapes",
+                "error": f"target_anchor must be n/s/e/w/auto, got '{target_anchor}'"}
+
+    atom_move_to(src_cx, src_cy)
+    time.sleep(0.15)
+    atom_click_at(src_cx, src_cy)
+    time.sleep(0.25)
+    detected_start = _detected_quick_connect_point(ui_graph, src, source_anchor)
+    if detected_start:
+        sx, sy = detected_start
+    else:
+        ui_graph["selected_handles"] = None
+        anchor = (src.get("anchors") or {}).get(source_anchor, [src_cx, src_cy])
+        dx, dy = _RESIZE_DIRECTION_VECTOR[source_anchor]
+        offset = _QUICK_CONNECT_OFFSET_BY_ANCHOR.get(
+            source_anchor, _QUICK_CONNECT_OFFSET_PX,
+        )
+        sx = int(anchor[0] + dx * offset)
+        sy = int(anchor[1] + dy * offset)
+    tx, ty = (tgt.get("anchors") or {}).get(target_anchor, [tgt_cx, tgt_cy])
+    ax, ay = _approach_point_for_anchor(
+        target_anchor, int(tx), int(ty), _TARGET_CONNECT_APPROACH_PX,
+    )
+    atom_move_to(sx, sy)
+    time.sleep(0.25)
     logger.info("  [L1] connect_shapes(%s→%s) "
-                "drag (%d,%d) → (%d,%d)",
-                source_id, target_id, sx, sy, tgt_cx, tgt_cy)
-    atom_drag(sx, sy, tgt_cx, tgt_cy,
-              duration=config.drag_duration() * 1.5, hold_pre=0.15)
+                "drag path (%d,%d) → (%d,%d) → (%d,%d)",
+                source_id, target_id, sx, sy, ax, ay, tx, ty)
+    atom_drag_path(
+        [(sx, sy), (ax, ay), (int(tx), int(ty))],
+        duration=config.drag_duration() * 1.8,
+        hold_pre=0.15,
+    )
     time.sleep(0.6)
-    opp = {"n": "s", "s": "n", "e": "w", "w": "e"}[source_anchor]
     _sg.add_edge(
         sg, source=source_id, target=target_id,
-        source_anchor=source_anchor, target_anchor=opp,
+        source_anchor=source_anchor, target_anchor=target_anchor,
         op_name="connect_shapes",
     )
+    atom_press("Escape")
+    time.sleep(0.1)
     save_scene(ui_graph)
     return {"status": "ok", "tool": "connect_shapes",
             "source": source_id, "target": target_id,
-            "source_anchor": source_anchor, "target_anchor": opp,
-            "from": [sx, sy], "to": [tgt_cx, tgt_cy]}
+            "source_anchor": source_anchor, "target_anchor": target_anchor,
+            "from": [sx, sy], "approach": [ax, ay], "to": [tx, ty]}
 
 
 def _fn_label_edge(ui_graph: Dict[str, Any], edge_id: str, text: str) -> dict:

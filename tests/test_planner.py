@@ -51,6 +51,48 @@ _SAMPLE_REPLY = """\
 """
 
 
+def test_parse_plan_response_salvages_duplicate_tool_key_steps():
+    from core.agents.planner import parse_plan_response
+
+    raw = """{
+      "reasoning": "connect five rectangles",
+      "steps": [
+        {"tool": "place_label_and_move",
+         "params": {"tool_name": "Rectangle_Tool", "label": "Rect1",
+                    "direction": "n", "amount": 100}},
+        {"tool": "connect_shapes",
+         "params": {"source_id": "Rect1", "target_id": "Rect2",
+                    "source_anchor": "e", "target_anchor": "w",
+                    "checkpoint": {"description": "Connect Rect1 to Rect2",
+                                   "assert": [{"check": "edge_exists",
+                                                "source": "Rect1",
+                                                "target": "Rect2"}]}},
+         "connect_shapes": {"source_id": "Rect2", "target_id": "Rect3",
+                            "source_anchor": "e", "target_anchor": "w"},
+         "connect_shapes": {"source_id": "Rect3", "target_id": "Rect4",
+                            "source_anchor": "e", "target_anchor": "w"}}
+      ]
+    }"""
+
+    parsed = parse_plan_response(raw)
+
+    assert [s["tool"] for s in parsed["steps"]] == [
+        "place_label_and_move",
+        "connect_shapes",
+        "connect_shapes",
+        "connect_shapes",
+    ]
+    assert parsed["steps"][1]["params"] == {
+        "source_id": "Rect1",
+        "target_id": "Rect2",
+        "source_anchor": "e",
+        "target_anchor": "w",
+    }
+    assert parsed["steps"][1]["checkpoint"]["description"] == "Connect Rect1 to Rect2"
+    assert parsed["steps"][2]["params"]["source_id"] == "Rect2"
+    assert parsed["steps"][3]["params"]["source_id"] == "Rect3"
+
+
 def _load_graph() -> dict:
     g = config.ui_graph()
     g["scene_graph"] = sg.load()

@@ -71,6 +71,28 @@ def test_eval() -> None:
         assert not ok, f"expected FAIL for {name}: {detail}"
     print(f"  ✓ {len(failing)} failing assertions all failed")
 
+    spaced_scene = {
+        "objects": [
+            {"id": "obj_001", "label": "Rect1", "bbox": [0, 0, 80, 40]},
+            {"id": "obj_002", "label": "Rect2", "bbox": [110, 0, 80, 40]},
+        ],
+        "edges": [],
+        "metadata": {},
+    }
+    touching_scene = {
+        "objects": [
+            {"id": "obj_001", "label": "Rect1", "bbox": [0, 0, 80, 40]},
+            {"id": "obj_002", "label": "Rect2", "bbox": [80, 0, 80, 40]},
+        ],
+        "edges": [],
+        "metadata": {},
+    }
+    no_overlap = {"check": "no_overlap", "labels": ["Rect1", "Rect2"], "min_gap": 12}
+    ok, detail = ck._eval_assertion(no_overlap, spaced_scene)
+    assert ok, f"expected PASS for no_overlap: {detail}"
+    ok, detail = ck._eval_assertion(no_overlap, touching_scene)
+    assert not ok, f"expected FAIL for touching no_overlap: {detail}"
+
     # evaluate() aggregation + empty-checkpoint vacuous pass.
     r = ck.evaluate({"description": "d", "assert": list(passing.values())}, scene)
     assert r["passed"] is True and len(r["results"]) == len(passing)

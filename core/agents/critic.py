@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
+import json
 from typing import Any, Dict, Optional
 
 from core import config
@@ -53,6 +54,8 @@ def _infer_passed_from_text(text: str) -> Optional[bool]:
         "incorrect", "wrong", "empty", "ambiguous", "not placed",
         "no second", "no rectangle", "no shape", "only a single",
         "only one", "only 1", "there is no",
+        "not a rectangle", "not rectangle", "not the expected",
+        "not as expected", "rather than", "instead of",
     ]
     positive = [
         "satisfies", "satisfied", "clearly shows", "is visible",
@@ -67,6 +70,58 @@ def _infer_passed_from_text(text: str) -> Optional[bool]:
     if match:
         return match.group(1) in {"true", "yes"}
     return None
+
+
+def _extract_json_string_field(raw: str, field: str) -> str:
+    """Best-effort extraction of a JSON string field from malformed replies."""
+    match = re.search(rf'"{re.escape(field)}"\s*:\s*"', raw)
+    if not match:
+        return ""
+
+    i = match.end()
+    chars = []
+    escaped = False
+    while i < len(raw):
+        ch = raw[i]
+        if escaped:
+            chars.append("\\" + ch)
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == '"':
+            break
+        else:
+            chars.append(ch)
+        i += 1
+
+    text = "".join(chars)
+    try:
+        return json.loads(f'"{text}"')
+    except json.JSONDecodeError:
+        return text.replace('\\"', '"').replace("\\'", "'").strip()
+
+
+def _salvage_critic_reply(raw: str) -> Optional[Dict[str, Any]]:
+    """Recover a verdict from partial/non-strict critic JSON."""
+    reasoning = _extract_json_string_field(raw, "reasoning")
+
+    passed_match = re.search(
+        r'"passed"\s*:\s*(true|false|"true"|"false"|"yes"|"no")',
+        raw,
+        flags=re.IGNORECASE,
+    )
+    passed = None
+    if passed_match:
+        passed = _coerce_passed(passed_match.group(1).strip('"'))
+    if passed is None:
+        passed = _infer_passed_from_text(reasoning or raw)
+    if passed is None:
+        return None
+
+    return {
+        "passed": passed,
+        "reasoning": reasoning or "critic reply was malformed; inferred from reply: " + raw[:180],
+    }
 
 
 def _coerce_passed(value: Any) -> Optional[bool]:
@@ -176,6 +231,10 @@ def verify(
                 "reasoning": reasoning or "critic omitted passed; inferred from reply",
                 "model": model,
             }
+
+    salvaged = _salvage_critic_reply(raw)
+    if salvaged is not None:
+        return {**salvaged, "model": model}
 
     inferred = _infer_passed_from_text(raw)
     if inferred is not None:
