@@ -164,19 +164,25 @@ def _build_model_config(cfg: Dict[str, Any], purpose: str) -> ModelConfig:
 def _build_target(cfg: Dict[str, Any]) -> TargetConfig:
     t = cfg.get("target", {})
     matches = t.get("url_match", ["app.diagrams.net", "draw.io", "drawio"])
+    backend = os.environ.get("DRAWIO_TARGET_BACKEND") or t.get("backend", "pyautogui")
+    fallback = os.environ.get("DRAWIO_TARGET_FALLBACK") or t.get("fallback", "pyautogui")
     return TargetConfig(
-        backend=t.get("backend", "pyautogui"),
+        backend=backend,
         debug_port=int(t.get("debug_port", 9222)),
         url_match=tuple(str(m) for m in matches),
         screenshot_mode=t.get("screenshot_mode", "tab"),
-        fallback=t.get("fallback", "pyautogui"),
+        fallback=fallback,
     )
 
 
 def _build_executor(cfg: Dict[str, Any]) -> ExecutorConfig:
     e = cfg["executor"]
+    failsafe_env = os.environ.get("DRAWIO_EXECUTOR_FAILSAFE")
+    failsafe = e["failsafe"]
+    if failsafe_env is not None:
+        failsafe = failsafe_env.strip().lower() not in {"0", "false", "no", "off"}
     return ExecutorConfig(
-        failsafe=e["failsafe"],
+        failsafe=failsafe,
         pause=e["pause"],
         drag_duration=e["drag_duration"],
         type_interval=e["type_interval"],

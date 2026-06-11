@@ -72,7 +72,12 @@ class ChromeCdpController(CaptureController, InputController):
         try:
             ws.send(json.dumps(payload))
             while True:
-                raw = ws.recv()
+                try:
+                    raw = ws.recv()
+                except websocket.WebSocketTimeoutException:
+                    if method == "Input.dispatchMouseEvent":
+                        return {}
+                    raise
                 data = json.loads(raw)
                 if data.get("id") == self._msg_id:
                     if "error" in data:
@@ -95,21 +100,29 @@ class ChromeCdpController(CaptureController, InputController):
             raise RuntimeError("Matched Chrome tab has no webSocketDebuggerUrl")
         ws = websocket.create_connection(url, timeout=10, suppress_origin=True)
         try:
+            pending: set[int] = set()
             for method, params in calls:
                 self._msg_id += 1
                 msg_id = self._msg_id
+                pending.add(msg_id)
                 ws.send(json.dumps({
                     "id": msg_id,
                     "method": method,
                     "params": params,
                 }))
-                while True:
+            ws.settimeout(2.0)
+            deadline = time.time() + 5.0
+            while pending and time.time() < deadline:
+                try:
                     raw = ws.recv()
-                    data = json.loads(raw)
-                    if data.get("id") == msg_id:
-                        if "error" in data:
-                            raise RuntimeError(f"CDP {method} failed: {data['error']}")
-                        break
+                except websocket.WebSocketTimeoutException:
+                    break
+                data = json.loads(raw)
+                msg_id = data.get("id")
+                if msg_id in pending:
+                    if "error" in data:
+                        raise RuntimeError(f"CDP input batch failed: {data['error']}")
+                    pending.remove(msg_id)
         finally:
             ws.close()
 
