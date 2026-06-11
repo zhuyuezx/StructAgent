@@ -83,9 +83,22 @@ def chat(
         resp = client.post(f"{base_url}/chat/completions", headers=headers, json=payload)
         resp.raise_for_status()
         data = resp.json()
+    usage = None
+    raw_usage = data.get("usage")
+    if isinstance(raw_usage, dict):
+        prompt = raw_usage.get("prompt_tokens")
+        completion = raw_usage.get("completion_tokens")
+        if isinstance(prompt, int) or isinstance(completion, int):
+            usage = {
+                "prompt_tokens": int(prompt or 0),
+                "completion_tokens": int(completion or 0),
+                "total_tokens": int(raw_usage.get("total_tokens")
+                                    or (prompt or 0) + (completion or 0)),
+            }
     return ChatResponse(
         content=data["choices"][0]["message"]["content"],
         model=cfg.model,
         provider=cfg.provider,
         raw=data,
+        usage=usage,
     )

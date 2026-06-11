@@ -126,6 +126,69 @@ class ChromeCdpController(CaptureController, InputController):
         finally:
             ws.close()
 
+    def reload(self, settle_seconds: float = 6.0) -> None:
+        """Reload the draw.io tab and wait for it to settle.
+
+        draw.io installs a beforeunload handler that pops a blocking
+        "changes you made may not be saved" dialog on reload; clear it first
+        so the reload never stalls waiting for a human click.
+        ``settle_seconds`` is a simple post-reload wait — draw.io
+        re-initializes its editor well within that on a local instance.
+        """
+        self._call("Page.enable")
+        try:
+            self._call("Runtime.evaluate", {
+                "expression": "window.onbeforeunload = null; true",
+                "returnByValue": True,
+            })
+        except Exception:
+            pass  # reload still works; worst case the dialog appears
+        self._call("Page.reload", {"ignoreCache": False})
+        time.sleep(settle_seconds)
+        # The tab id survives a reload, but re-resolve anyway in case the
+        # navigation replaced the target.
+        self.refresh()
+
+    # JS executed in the draw.io tab. After app init, draw.io rewires
+    # Draw.loadPlugin to invoke callbacks immediately with the live EditorUi,
+    # which is the only sanctioned handle to the editor from outside.
+    _RESET_VIEW_EXPR = """\
+(() => {
+  let ui = null;
+  if (window.Draw && typeof window.Draw.loadPlugin === 'function') {
+    window.Draw.loadPlugin(function(u) { ui = u; });
+  }
+  if (!ui) return {ok: false, error: 'EditorUi not reachable via Draw.loadPlugin'};
+  const graph = ui.editor.graph;
+  graph.clearSelection();
+  const action = ui.actions.get('resetView');
+  if (action) { action.funct(); }
+  else { graph.zoomTo(1); ui.resetScrollbars(); }
+  const t = graph.view.translate;
+  const c = graph.container;
+  return {ok: true, zoom: graph.view.scale,
+          translate: {x: t.x, y: t.y},
+          scroll: {left: c.scrollLeft, top: c.scrollTop}};
+})()"""
+
+    def reset_view(self) -> Dict[str, Any]:
+        """Reset the draw.io viewport: zoom 100%, canonical scroll position.
+
+        Invokes the editor's own ``resetView`` action through the live
+        EditorUi instance — deterministic regardless of how the current
+        draw.io build maps keyboard shortcuts (Ctrl+Shift+H is "Fit Page"
+        in recent builds, which SHRINKS the view instead of resetting it).
+        Also clears any selection. Returns the resulting viewport state.
+        """
+        result = self._call("Runtime.evaluate", {
+            "expression": self._RESET_VIEW_EXPR,
+            "returnByValue": True,
+        })
+        value = (result.get("result") or {}).get("value") or {}
+        if not value.get("ok"):
+            raise RuntimeError(f"reset_view failed: {value.get('error', value)}")
+        return value
+
     def screenshot(self, path: str) -> str:
         self._call("Page.enable")
         metrics = self._call("Page.getLayoutMetrics")

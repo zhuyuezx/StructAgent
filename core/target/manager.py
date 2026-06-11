@@ -72,6 +72,33 @@ def screenshot_scale() -> float:
         return float(config.screen_scale())
 
 
+def reload_page(settle_seconds: float = 6.0) -> bool:
+    """Reload the target page if the active backend supports it.
+
+    Returns True when a reload actually happened (chrome_cdp), False when
+    the backend has no notion of a page (pyautogui).
+    """
+    ctrl = controller()
+    reload_fn = getattr(ctrl, "reload", None)
+    if reload_fn is None:
+        return False
+    reload_fn(settle_seconds=settle_seconds)
+    return True
+
+
+def reset_view() -> Dict[str, Any] | None:
+    """Reset the target's viewport (zoom 100% + canonical scroll) if supported.
+
+    Returns the resulting viewport state dict (chrome_cdp), or None when the
+    active backend has no viewport concept (pyautogui).
+    """
+    ctrl = controller()
+    reset_fn = getattr(ctrl, "reset_view", None)
+    if reset_fn is None:
+        return None
+    return reset_fn()
+
+
 def canvas_center() -> tuple[int, int]:
     """Best available center point for focusing/dragging on the target canvas."""
     ctrl = capture_controller()

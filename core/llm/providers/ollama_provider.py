@@ -42,9 +42,23 @@ def chat(
         resp = client.chat(model=cfg.model, messages=request_messages)
     else:
         resp = ollama.chat(model=cfg.model, messages=request_messages)
+    usage = None
+    try:
+        prompt = resp.get("prompt_eval_count")
+        completion = resp.get("eval_count")
+    except AttributeError:  # ollama may return a pydantic object
+        prompt = getattr(resp, "prompt_eval_count", None)
+        completion = getattr(resp, "eval_count", None)
+    if isinstance(prompt, int) or isinstance(completion, int):
+        usage = {
+            "prompt_tokens": int(prompt or 0),
+            "completion_tokens": int(completion or 0),
+            "total_tokens": int(prompt or 0) + int(completion or 0),
+        }
     return ChatResponse(
         content=resp["message"]["content"],
         model=cfg.model,
         provider=cfg.provider,
         raw=resp,
+        usage=usage,
     )
