@@ -1,14 +1,19 @@
 {
   "name": "connect_shapes",
-  "description": "Draw an edge from source to target. source_anchor=n/s/e/w/auto.",
+  "description": "Move to the source shape, click it, move to its quick-connect arrow, then drag onto the target shape anchor so draw.io snaps the connector. source_anchor/target_anchor=n/s/e/w/auto.",
   "params": [
     "source_id",
     "target_id",
-    "source_anchor"
+    "source_anchor",
+    "target_anchor"
   ],
   "needs_ui_graph": true,
   "children": [
-    "mouse_drag"
+    "mouse_move",
+    "click_node",
+    "mouse_click",
+    "mouse_drag",
+    "press_escape"
   ],
   "python_fn": "domains.drawio.operations:_fn_connect_shapes"
 }

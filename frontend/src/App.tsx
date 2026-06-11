@@ -10,6 +10,7 @@ import { ToolTree } from './components/ToolTree';
 import type {
   CapturedIcon,
   SceneGraph,
+  TargetStatusResult,
   ToolDetail as Detail,
   ToolSummary,
 } from './types';
@@ -27,6 +28,7 @@ export default function App() {
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [domains, setDomains] = useState<string[]>([]);
   const [activeDomain, setActiveDomain] = useState<string>('drawio');
+  const [targetStatus, setTargetStatus] = useState<TargetStatusResult | null>(null);
 
   // Soft reload: just re-fetch the catalog from server memory.
   const reloadTools = useCallback(async () => {
@@ -97,12 +99,22 @@ export default function App() {
     }
   }, []);
 
+  const reloadTarget = useCallback(async () => {
+    try {
+      const res = await api.targetStatus();
+      setTargetStatus(res);
+    } catch (e) {
+      setGlobalError(String(e));
+    }
+  }, []);
+
   useEffect(() => {
     reloadTools();
     reloadSceneGraph();
     reloadIcons();
     reloadDomains();
-  }, [reloadTools, reloadSceneGraph, reloadIcons, reloadDomains]);
+    reloadTarget();
+  }, [reloadTools, reloadSceneGraph, reloadIcons, reloadDomains, reloadTarget]);
 
   // Switch the active interface: backend swaps the live ui_graph + resets the
   // canvas; we then re-pull everything tied to the interface.
@@ -215,6 +227,21 @@ export default function App() {
             ))}
           </select>
         </label>
+        <button
+          className={`app__target ${targetStatus?.connected ? 'ok' : 'warn'}`}
+          onClick={async () => {
+            try {
+              const res = await api.targetRefresh();
+              setTargetStatus(res);
+              setGlobalError(null);
+            } catch (e) {
+              setGlobalError(String(e));
+            }
+          }}
+          title={targetStatus?.url || targetStatus?.error || 'Target status'}
+        >
+          {targetStatus?.backend ?? 'target'}: {targetStatus?.connected ? 'ready' : 'missing'}
+        </button>
       </header>
 
       <main className={`app__main ${tab === 'explore' ? 'app__main--full' : ''}`}>

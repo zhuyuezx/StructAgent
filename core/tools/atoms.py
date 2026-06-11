@@ -13,12 +13,10 @@ These are the building blocks used by:
 from __future__ import annotations
 
 import logging
-import time
-from typing import Optional
-
-import pyautogui
+from typing import List, Optional, Tuple
 
 from core import config
+from core.target import manager as target_manager
 
 logger = logging.getLogger(__name__)
 
@@ -29,19 +27,12 @@ logger = logging.getLogger(__name__)
 
 def atom_move_to(x: int, y: int) -> None:
     """Move the cursor to (x, y) without clicking."""
-    pyautogui.moveTo(x, y)
+    target_manager.input_controller().move_to(x, y)
 
 
 def atom_click_at(x: int, y: int, clicks: int = 1, hold: float = 0.08) -> None:
     """Click at (x, y) with explicit down/up + hold so drawio registers it."""
-    pyautogui.moveTo(x, y)
-    time.sleep(0.05)
-    for i in range(clicks):
-        pyautogui.mouseDown()
-        time.sleep(hold)
-        pyautogui.mouseUp()
-        if i + 1 < clicks:
-            time.sleep(0.08)
+    target_manager.input_controller().click_at(x, y, clicks=clicks, hold=hold)
 
 
 def atom_drag(
@@ -51,12 +42,17 @@ def atom_drag(
     """Drag from (sx, sy) to (tx, ty)."""
     if duration is None:
         duration = config.drag_duration()
-    pyautogui.moveTo(sx, sy)
-    time.sleep(0.05)
-    pyautogui.mouseDown()
-    time.sleep(hold_pre)
-    pyautogui.moveTo(tx, ty, duration=duration)
-    pyautogui.mouseUp()
+    target_manager.input_controller().drag(sx, sy, tx, ty, duration=duration, hold_pre=hold_pre)
+
+
+def atom_drag_path(
+    points: List[Tuple[int, int]], duration: Optional[float] = None,
+    hold_pre: float = 0.1,
+) -> None:
+    """Drag through multiple points while holding the mouse button."""
+    if duration is None:
+        duration = config.drag_duration()
+    target_manager.input_controller().drag_path(points, duration=duration, hold_pre=hold_pre)
 
 
 # ===========================================================================
@@ -65,16 +61,16 @@ def atom_drag(
 
 def atom_press(key: str) -> None:
     """Press a single key."""
-    pyautogui.hotkey(key)
+    target_manager.input_controller().press(key)
 
 
 def atom_hotkey(*keys: str) -> None:
     """Press a key combo (e.g. ``"command", "z"``)."""
-    pyautogui.hotkey(*keys)
+    target_manager.input_controller().hotkey(*keys)
 
 
 def atom_write(text: str, interval: Optional[float] = None) -> None:
     """Type *text* into the focused field."""
     if interval is None:
         interval = config.type_interval()
-    pyautogui.write(text, interval=interval)
+    target_manager.input_controller().write(text, interval=interval)

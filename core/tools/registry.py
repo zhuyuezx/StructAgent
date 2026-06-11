@@ -9,6 +9,7 @@ self-register on import of ``domains.<name>.tools``.
 from __future__ import annotations
 
 import inspect
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -81,9 +82,17 @@ class ToolNode:
 def resolve_tool(ui_graph: Dict[str, Any], name: str) -> Tuple[int, int]:
     """Look up a sidebar tool's (x, y) from the UI graph."""
     elements = ui_graph.get("UI_Elements", {})
-    if name not in elements:
+    resolved_name = name
+    if resolved_name not in elements:
+        stripped = str(name).strip()
+        aliases = [
+            stripped,
+            re.sub(r"(\D)\d+_Tool$", r"\1_Tool", stripped),
+        ]
+        resolved_name = next((alias for alias in aliases if alias in elements), name)
+    if resolved_name not in elements:
         raise KeyError(f"Tool '{name}' not found. Available: {list(elements.keys())}")
-    e = elements[name]
+    e = elements[resolved_name]
     return e["x"], e["y"]
 
 

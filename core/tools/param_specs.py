@@ -94,6 +94,11 @@ PARAM_SPECS: Dict[str, Dict[str, Any]] = {
         "description": "Side of the source the edge leaves from. 'auto' lets "
                        "the framework pick the side facing the target.",
     },
+    "target_anchor": {
+        "type": "anchor", "enum": ["n", "s", "e", "w", "auto"],
+        "description": "Side of the target the edge connects to. 'auto' lets "
+                       "the framework pick the side facing the source.",
+    },
     "edge_id": {
         "type": "scene_edge", "source": "scene_edges",
         "description": "Edge to act on — an edge id (edge_NNN) from the SCENE "

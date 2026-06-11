@@ -43,11 +43,12 @@ _cfg: Dict[str, Any] = _load(_CONFIG_PATH)
 
 def reload() -> None:
     """Re-read config.json and rebuild namespace objects."""
-    global _cfg, llm, executor, explorer, _ACTIVE_DOMAIN
+    global _cfg, llm, executor, explorer, target, _ACTIVE_DOMAIN
     _cfg = _load(_CONFIG_PATH)
     llm = _build_llm(_cfg)
     executor = _build_executor(_cfg)
     explorer = _build_explorer(_cfg)
+    target = _build_target(_cfg)
     _ACTIVE_DOMAIN = _cfg.get("domain", "drawio")
 
 
@@ -85,6 +86,29 @@ class ExplorerConfig:
     label_max_retries: int
 
 
+@dataclass(frozen=True)
+class ModelConfig:
+    """Per-purpose LLM provider settings."""
+    provider: str
+    model: str
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    api_key_env: Optional[str] = None
+    timeout: Optional[float] = None
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class TargetConfig:
+    """Screenshot/input target settings."""
+    backend: str
+    debug_port: int
+    url_match: Tuple[str, ...]
+    screenshot_mode: str
+    fallback: str
+
+
 def _build_llm(cfg: Dict[str, Any]) -> LLMConfig:
     return LLMConfig(
         model=cfg["llm"]["model"],
@@ -92,10 +116,73 @@ def _build_llm(cfg: Dict[str, Any]) -> LLMConfig:
     )
 
 
+def _legacy_model_config(cfg: Dict[str, Any], purpose: str) -> Dict[str, Any]:
+    if purpose in {"planner", "executor"}:
+        llm_cfg = cfg.get("llm", {})
+        return {
+            "provider": llm_cfg.get("provider", "ollama"),
+            "model": llm_cfg.get("model", "qwen3.5:35b"),
+            "timeout": llm_cfg.get("timeout"),
+        }
+    if purpose == "critic":
+        critic_cfg = cfg.get("critic", {})
+        explorer_cfg = cfg.get("explorer", {})
+        return {
+            "provider": critic_cfg.get("provider", explorer_cfg.get("provider", "ollama")),
+            "model": critic_cfg.get("model", explorer_cfg.get("model", "qwen3-vl:4b")),
+            "timeout": critic_cfg.get("timeout", 60),
+        }
+    explorer_cfg = cfg.get("explorer", {})
+    return {
+        "provider": explorer_cfg.get("provider", "ollama"),
+        "model": explorer_cfg.get("model", "qwen3-vl:4b"),
+        "timeout": explorer_cfg.get("label_timeout", 30),
+    }
+
+
+def _build_model_config(cfg: Dict[str, Any], purpose: str) -> ModelConfig:
+    raw = dict(_legacy_model_config(cfg, purpose))
+    raw.update(cfg.get("models", {}).get(purpose, {}))
+    if raw.get("provider") == "openai" and not raw.get("api_key_env") and not raw.get("api_key"):
+        raw["api_key_env"] = "OPENAI_API_KEY"
+    api_key = raw.get("api_key")
+    api_key_env = raw.get("api_key_env")
+    if not api_key and api_key_env:
+        api_key = os.environ.get(api_key_env)
+    return ModelConfig(
+        provider=raw.get("provider", "ollama"),
+        model=raw["model"],
+        base_url=raw.get("base_url"),
+        api_key=api_key,
+        api_key_env=api_key_env,
+        timeout=raw.get("timeout"),
+        max_tokens=raw.get("max_tokens"),
+        temperature=raw.get("temperature"),
+    )
+
+
+def _build_target(cfg: Dict[str, Any]) -> TargetConfig:
+    t = cfg.get("target", {})
+    matches = t.get("url_match", ["app.diagrams.net", "draw.io", "drawio"])
+    backend = os.environ.get("DRAWIO_TARGET_BACKEND") or t.get("backend", "pyautogui")
+    fallback = os.environ.get("DRAWIO_TARGET_FALLBACK") or t.get("fallback", "pyautogui")
+    return TargetConfig(
+        backend=backend,
+        debug_port=int(t.get("debug_port", 9222)),
+        url_match=tuple(str(m) for m in matches),
+        screenshot_mode=t.get("screenshot_mode", "tab"),
+        fallback=fallback,
+    )
+
+
 def _build_executor(cfg: Dict[str, Any]) -> ExecutorConfig:
     e = cfg["executor"]
+    failsafe_env = os.environ.get("DRAWIO_EXECUTOR_FAILSAFE")
+    failsafe = e["failsafe"]
+    if failsafe_env is not None:
+        failsafe = failsafe_env.strip().lower() not in {"0", "false", "no", "off"}
     return ExecutorConfig(
-        failsafe=e["failsafe"],
+        failsafe=failsafe,
         pause=e["pause"],
         drag_duration=e["drag_duration"],
         type_interval=e["type_interval"],
@@ -123,6 +210,7 @@ def _build_explorer(cfg: Dict[str, Any]) -> ExplorerConfig:
 llm = _build_llm(_cfg)
 executor = _build_executor(_cfg)
 explorer = _build_explorer(_cfg)
+target = _build_target(_cfg)
 
 
 # ===========================================================================
@@ -270,6 +358,21 @@ def llm_model() -> str:
 def llm_max_steps() -> int:
     return llm.max_steps
 
+def model_config(purpose: str) -> ModelConfig:
+    return _build_model_config(_cfg, purpose)
+
+def planner_model_config() -> ModelConfig:
+    return model_config("planner")
+
+def executor_model_config() -> ModelConfig:
+    return model_config("executor")
+
+def critic_model_config() -> ModelConfig:
+    return model_config("critic")
+
+def explorer_model_config() -> ModelConfig:
+    return model_config("explorer")
+
 # Executor
 def executor_failsafe() -> bool:
     return executor.failsafe
@@ -326,6 +429,10 @@ def label_timeout() -> float:
 
 def label_max_retries() -> int:
     return explorer.label_max_retries
+
+# Target
+def target_config() -> TargetConfig:
+    return _build_target(_cfg)
 
 
 # ---------------------------------------------------------------------------

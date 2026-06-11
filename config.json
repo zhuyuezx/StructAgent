@@ -22,6 +22,51 @@
     "model": "qwen3.5:35b",
     "max_steps": 10
   },
+  "models": {
+    "planner": {
+      "provider": "openai_compatible",
+      "model": "Qwen3.5-4B",
+      "base_url": "http://127.0.0.1:8001/v1",
+      "timeout": 120,
+      "max_tokens": 32768,
+      "temperature": 0
+    },
+    "executor": {
+      "provider": "openai_compatible",
+      "model": "Qwen3.5-4B",
+      "base_url": "http://127.0.0.1:8001/v1",
+      "timeout": 120,
+      "max_tokens": 1024,
+      "temperature": 0
+    },
+    "critic": {
+      "provider": "openai_compatible",
+      "model": "Qwen3.5-4B",
+      "base_url": "http://127.0.0.1:8001/v1",
+      "timeout": 120,
+      "max_tokens": 512,
+      "temperature": 0
+    },
+    "explorer": {
+      "provider": "openai_compatible",
+      "model": "Qwen3.5-4B",
+      "base_url": "http://127.0.0.1:8001/v1",
+      "timeout": 120,
+      "max_tokens": 64,
+      "temperature": 0
+    }
+  },
+  "target": {
+    "backend": "chrome_cdp",
+    "debug_port": 9222,
+    "url_match": [
+      "app.diagrams.net",
+      "draw.io",
+      "drawio"
+    ],
+    "screenshot_mode": "tab",
+    "fallback": "none"
+  },
   "executor": {
     "failsafe": true,
     "pause": 0.15,

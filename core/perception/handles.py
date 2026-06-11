@@ -36,6 +36,7 @@ import cv2
 import numpy as np
 
 from core import config
+from core.target import manager as target_manager
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +293,9 @@ def detect_handles(screenshot_path: str) -> SelectionHandles:
     img = cv2.imread(screenshot_path)
     if img is None:
         raise FileNotFoundError(screenshot_path)
-    scale = config.screen_scale()
+    scale = target_manager.screenshot_scale()
+    if scale <= 0:
+        scale = float(config.screen_scale())
 
     bright = _bright_contours(img)
 
@@ -318,15 +321,15 @@ def detect_handles(screenshot_path: str) -> SelectionHandles:
     extend_phys = _find_extend_arrows(img, bbox_phys)
 
     def _logical(p: Tuple[int, int]) -> Tuple[int, int]:
-        return (p[0] // scale, p[1] // scale)
+        return (round(p[0] / scale), round(p[1] / scale))
 
     return SelectionHandles(
         resize={k: _logical(v) for k, v in resize_phys.items()},
         extend={k: _logical(v) for k, v in extend_phys.items()},
         rotate=_logical(rotate_phys) if rotate_phys else None,
         shape_bbox=(
-            bbox_phys[0] // scale, bbox_phys[1] // scale,
-            bbox_phys[2] // scale, bbox_phys[3] // scale,
+            round(bbox_phys[0] / scale), round(bbox_phys[1] / scale),
+            round(bbox_phys[2] / scale), round(bbox_phys[3] / scale),
         ),
     )
 

@@ -26,14 +26,15 @@ logger = logging.getLogger(__name__)
 def detect_icons(
     screenshot_path: str,
     region: Tuple[int, int, int, int] | None = None,
+    scale: float | None = None,
 ) -> List[Dict[str, Any]]:
     """
     Detect icon-sized rectangular regions inside *region*.
 
-    Works on the raw screenshot (physical pixels) and returns coordinates
-    in LOGICAL pixels (divided by screen_scale).
+    Works on the raw screenshot pixels and returns coordinates in target input
+    coordinates (screenshot pixels divided by ``scale``).
     """
-    scale = config.screen_scale()
+    scale = float(scale if scale is not None else config.screen_scale())
     min_sz, max_sz = config.icon_size_range()
     nms_dist = config.nms_distance()
 
@@ -61,8 +62,8 @@ def detect_icons(
                 cx = x1 + bx + bw // 2
                 cy = y1 + by + bh // 2
                 icons.append({
-                    "x": cx // scale, "y": cy // scale,
-                    "w": bw // scale, "h": bh // scale,
+                    "x": round(cx / scale), "y": round(cy / scale),
+                    "w": round(bw / scale), "h": round(bh / scale),
                     "_px": {"x": cx, "y": cy, "w": bw, "h": bh},
                 })
 
@@ -94,15 +95,16 @@ def annotate(
     screenshot_path: str,
     icons: List[Dict[str, Any]],
     output_path: str,
+    scale: float | None = None,
 ) -> str:
     """Draw bounding boxes on the screenshot and save. Returns output path."""
     img = cv2.imread(screenshot_path)
-    scale = config.screen_scale()
+    scale = float(scale if scale is not None else config.screen_scale())
 
     for i, icon in enumerate(icons):
         p = icon.get("_px", {
-            "x": icon["x"] * scale, "y": icon["y"] * scale,
-            "w": icon["w"] * scale, "h": icon["h"] * scale,
+            "x": round(icon["x"] * scale), "y": round(icon["y"] * scale),
+            "w": round(icon["w"] * scale), "h": round(icon["h"] * scale),
         })
         x1 = p["x"] - p["w"] // 2
         y1 = p["y"] - p["h"] // 2

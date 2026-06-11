@@ -14,16 +14,23 @@ Each function:
 from __future__ import annotations
 
 import logging
+import platform
 import time
 from typing import Any, Dict, Optional
 
 from core import config
 from core.state import scene_graph as _sg
+from core.target import manager as target_manager
 from core.tools.atoms import atom_click_at, atom_drag, atom_hotkey, atom_press
 from core.tools.reconcile import get_scene, save_scene, scan_and_reconcile
 from core.tools.registry import resolve_node
 
 logger = logging.getLogger(__name__)
+
+
+def _mod_key() -> str:
+    """Return the platform shortcut modifier used by draw.io."""
+    return "command" if platform.system() == "Darwin" else "ctrl"
 
 
 # ===========================================================================
@@ -76,7 +83,7 @@ def _resolve_node_xy(ui_graph: Dict[str, Any], ref: str) -> tuple:
 
 def _fn_click_empty_canvas(ui_graph: Optional[Dict[str, Any]] = None) -> dict:
     """Click the configured empty-canvas point and clear any selection."""
-    x, y = config.empty_canvas_point()
+    x, y = target_manager.canvas_center()
     logger.info("  [L1] click_empty_canvas → (%d, %d)", x, y)
     atom_click_at(x, y)
     if ui_graph is not None:
@@ -162,9 +169,10 @@ def _fn_hotkey(keys: list) -> dict:
 
 
 def _fn_undo() -> dict:
-    """Undo the last canvas action (Cmd+Z)."""
-    logger.info("  [L1] undo (Cmd+Z)")
-    atom_hotkey("command", "z")
+    """Undo the last canvas action."""
+    mod = _mod_key()
+    logger.info("  [L1] undo (%s+Z)", mod)
+    atom_hotkey(mod, "z")
     return {"status": "ok", "tool": "undo"}
 
 
@@ -176,11 +184,12 @@ def _fn_press_enter() -> dict:
 
 def _fn_press_delete() -> dict:
     logger.info("  [L1] press_delete")
-    atom_press("BackSpace")
+    atom_press("delete")
     return {"status": "ok", "tool": "press_delete"}
 
 
 def _fn_select_all() -> dict:
-    logger.info("  [L1] select_all (Cmd+A)")
-    atom_hotkey("command", "a")
+    mod = _mod_key()
+    logger.info("  [L1] select_all (%s+A)", mod)
+    atom_hotkey(mod, "a")
     return {"status": "ok", "tool": "select_all"}

@@ -59,6 +59,7 @@ CHECK_KINDS = (
     "edges_count",
     "object_exists",
     "edge_exists",
+    "no_overlap",
     "selected",
     "last_op",
 )
@@ -93,6 +94,23 @@ def _resolve_id(sg: Dict[str, Any], ref: Optional[str]) -> Optional[str]:
         return None
     obj = _find_object(sg, id=ref) or _find_object(sg, label=ref)
     return obj["id"] if obj else None
+
+
+def _selected_objects_for_assertion(a: Dict[str, Any], sg: Dict[str, Any]) -> List[Dict[str, Any]]:
+    labels = a.get("labels")
+    if isinstance(labels, list) and labels:
+        return [o for label in labels if (o := _find_object(sg, label=label))]
+    return [o for o in _objects(sg) if o.get("bbox")]
+
+
+def _bbox_gap(a: List[int], b: List[int]) -> Tuple[int, int]:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    ax2, ay2 = ax + aw, ay + ah
+    bx2, by2 = bx + bw, by + bh
+    gap_x = max(bx - ax2, ax - bx2, 0)
+    gap_y = max(by - ay2, ay - by2, 0)
+    return gap_x, gap_y
 
 
 def _cmp(got: Any, op: str, want: Any) -> bool:
@@ -137,6 +155,34 @@ def _eval_assertion(a: Dict[str, Any], sg: Dict[str, Any]) -> Tuple[bool, str]:
                     for e in _edges(sg)
                 )
         return found, f"edge {s_ref}→{t_ref}: {'found' if found else 'NOT found'}"
+
+    if check == "no_overlap":
+        min_gap = int(a.get("min_gap", 12))
+        objs = _selected_objects_for_assertion(a, sg)
+        missing = []
+        labels = a.get("labels")
+        if isinstance(labels, list):
+            found_labels = {o.get("label") for o in objs}
+            missing = [label for label in labels if label not in found_labels]
+        if missing:
+            return False, f"no_overlap: missing labels {missing}"
+        for i, left in enumerate(objs):
+            lb = left.get("bbox")
+            if not lb:
+                continue
+            for right in objs[i + 1:]:
+                rb = right.get("bbox")
+                if not rb:
+                    continue
+                gap_x, gap_y = _bbox_gap(lb, rb)
+                if gap_x < min_gap and gap_y < min_gap:
+                    lref = left.get("label") or left.get("id")
+                    rref = right.get("label") or right.get("id")
+                    return False, (
+                        f"no_overlap: {lref} and {rref} too close "
+                        f"(gap_x={gap_x}, gap_y={gap_y}, min_gap={min_gap})"
+                    )
+        return True, f"no_overlap: {len(objs)} object(s), min_gap={min_gap}"
 
     if check == "selected":
         sel = next((o for o in _objects(sg) if o.get("selected")), None)

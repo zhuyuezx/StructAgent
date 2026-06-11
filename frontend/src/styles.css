@@ -297,6 +297,36 @@ fieldset[disabled] {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
+.app__target {
+  padding: 5px 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+}
+.app__target.ok {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+.app__target.warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: #f0d08e;
+}
+.plan__raw {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.plan__raw pre {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  padding: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
 
 .app__main {
   flex: 1;
